@@ -1,0 +1,230 @@
+
+// Sub Main
+Local vStepCounter(0)
+
+
+//If Form is open already, close it before opening a new one.
+If oProcedureDialog not 0
+    Set oProcedureDialog.CloseForm = True;
+    Delete Var(oProcedureDialog); 
+	 
+Endif 
+
+
+
+Set vStepCounter = 0;
+
+New StringList NewVar(sFinalSteps);
+
+New StringList NewVar(sNumbers)
+	Value('one') Value('two') Value('three')
+	Value('four') Value('five') Value('six')
+	Value('seven') Value('eight') Value('nine')
+	Value('ten') Value('eleven') Value('twelve')
+	Value('thirteen') Value('fourteen') Value('fifteen')
+	Value('sixteen') Value('seventeen') Value('eighteen')
+	Value('nineteen') Value('twenty');
+
+Loop While(i <= sProcedureSteps.Count) LoopVar(i) InitVal(1) Incr(2)
+	Set vStepCounter = vStepCounter+1;
+	Add Member(sNumbers[vStepCounter]) To(sFinalSteps);
+	Add Member(vStepCounter) To(sFinalSteps);	
+	Add Member(sProcedureSteps[i]) To(sFinalSteps);
+	Add Member(sProcedureSteps[i+1]) To(sFinalSteps);								
+EndLoop
+
+
+
+// Set Window Dimensions
+Set vProcDialogHeight = ((sFinalSteps.count/4)*25)+120;
+
+If not vProcDialogLeft
+	Set vProcDialogLeft = 300;
+	Set vProcDialogTop = 100;
+	Set vProcDialogWidth = 550;
+EndIf
+
+Run ProcedureDialog;
+Run oProcedureDialog.ShowModeless NewVar(vValue);
+
+EndSub // DisplayDialog
+//-----------------------------------
+
+Sub ProcedureDialog
+
+New EForm NewVar(oProcedureDialog) Caption(vCaption) canresize(1) MinWidth(265) MinHeight(vProcDialogHeight)
+Top(vProcDialogTop) Left(vProcDialogLeft) Width(vProcDialogWidth) Height(vProcDialogHeight)
+OnMove(StoreTheLocation) OnSize(MoveButtons); // CanResize(True); // OnChange('MoveButtons');
+//MinWidth(350) MinHeight(200);
+
+
+//	New ELabel Form(oProcedureDialog) Caption('Follow these steps: ')
+//	  Left(2) Top(10) FontSize(14) Fontweight('Bold') WidthMinus(10) Height(30); //(oRenameDialog.width-10) Height(30);
+
+Set iFormCount = 0;
+Loop While(i <= sFinalSteps.Count) LoopVar(i) InitVal(1) Incr(4)
+	Set vMenuPosted = 0;
+	If (sFinalSteps[i+3] = 'NA')
+		Set iFormCount = iFormCount +1;
+		Set vMenuPosted = 1;
+
+        New ELabel Form(oProcedureDialog) Top(35+((i/4)*21)) Left(9)
+            WidthMinus(10) Height(18) EllipsisStyle('Word') Caption(' '+iFormCount+'.  '+sFinalSteps[i+2]); //Width(vDialogWidth-30)  
+	EndIf
+	
+	If (sFinalSteps[i+3] = 'NONUM')
+		Set vMenuPosted = 1;
+		New ELabel Form(oProcedureDialog) Top(35+((i/4)*21)) Left(9)
+			WidthMinus(10) Height(18) EllipsisStyle('Word') Caption(' '+'   '+sFinalSteps[i+2]); //Width(vDialogWidth-30)  
+	Endif
+
+	If (sFinalSteps[i+3] = 'BOLDHEADING')
+		Set vMenuPosted = 1;
+		New ELabel Form(oProcedureDialog) Top(35+((i/4)*21)) Left(0) fontweight('Bold') //fontsize(13)
+			WidthMinus(10) Height(18) EllipsisStyle('Word') Caption(' '+'   '+sFinalSteps[i+2]); //Width(vDialogWidth-30)  
+	Endif
+
+	If (sFinalSteps[i+3] = 'ITALICBODY')
+		Set vMenuPosted = 1;
+		New ELabel Form(oProcedureDialog) Top(35+((i/4)*21)) Left(0) fontangle('Italic') //fontsize(13)
+			WidthMinus(10) Height(18) EllipsisStyle('Word') Caption(' '+'   '+sFinalSteps[i+2]); //Width(vDialogWidth-30)  
+	Endif
+
+	
+	If (vMenuPosted = 0)
+		Find String('[ButtonOnly]') InString(sFinalSteps[i+2]) ReturnStatus(vFoundButtonOnly);
+
+		If vFoundButtonOnly 	// we don't want numbered step on the button
+			Set vButtonCaption = eStr.RemoveLeading{sFinalSteps[i+2],'[ButtonOnly]'};
+		Else						// we DO want a numbered step on the button
+			Set iFormCount = iFormCount +1;
+			Set vButtonCaption = ' '+iFormCount+'.  '+sFinalSteps[i+2];
+		EndIf
+		
+		If (sFinalSteps[i+3] = 'PDF')
+
+			// set up the menu caption
+			Run eSys.ExtractFileName FullPath(sFinalSteps[i+2]) NewVar(vBKMFile);
+			Run eSys.RemoveFileExtension FullPath(vBKMFile) NewVar(vBKMTitle);		
+			Set vButtonCaption = vBKMTitle;
+
+			New Ebutton Form(oProcedureDialog) NewVar(vCheckBoxes) Caption(vButtonCaption) //(' '+iFormCount+'.  '+sFinalSteps[i+2])
+			  Name(sFinalSteps[i]) HorzAlign('Left')
+			  Top(35+((i/4)*21)-3) Left(5) WidthMinus(10) Height(20) //Width(vDialogWidth-30)
+			  OnClick(BKMDocDisplay);
+
+			
+		Else	
+			New Ebutton Form(oProcedureDialog) NewVar(vCheckBoxes) Caption(vButtonCaption) //(' '+iFormCount+'.  '+sFinalSteps[i+2])
+			  Name(sFinalSteps[i]) HorzAlign('Left')
+			  Top(35+((i/4)*21)-3) Left(5) WidthMinus(10) Height(20) //Width(vDialogWidth-30)
+			  OnClick(DoAStep);
+		EndIf
+	EndIf
+EndLoop
+New Ebutton Form(oProcedureDialog) NewVar(vProcedureButton) Caption('Open Detailed Procedure PDF')
+	Name(eProcedureButton) HorzAlign('Center') Name('PDFButton')
+	TopLocFromBottom(45) Width(250) Left((oProcedureDialog.actualwidth-oProcedureDialog.ncwidth)-((oProcedureDialog.actualwidth-oProcedureDialog.ncwidth)/2)-125)
+ 	Height(30) OnClick('ProcedureDisplay');
+//	Top(5) Left(5) Width(250) Height(20) Left((oProcedureDialog.actualwidth/2)-125) LeftLocFromRight((oProcedureDialog.actualwidth)-((oProcedureDialog.actualwidth/2)-125))
+If not vRealInstructions
+	Set vProcedureButton.enabled = 0;
+EndIf
+EndSub
+
+// --------------------------------------
+Sub DoAStep
+// display 'start do a step'; // script doesn't even get here on second occurance!
+
+// Set oProcedureDialog.CloseForm = True; // Close the procedure menu (since I don't know how to make leaving it up work)
+
+
+If (not activebook) and (not activedoc)
+	display 'A file needs to be open first.'; // not the problem here
+	LeaveSub;
+EndIf
+
+
+//    Run GetConditionList;
+Set Session.IsInFront = True;
+
+Set vControl = EControlVar;
+Find Member(vControl.name) InList(sFinalSteps)	ReturnPos(vIndex);
+Get Member Number(vIndex+3) From(sFinalSteps) NewVar(vScriptName);
+New ScriptVar NewVar(oProcessScript) File(vScriptName);
+Run oProcessScript;  // this could run a single script or a script that runs multiple scripts     
+
+
+EndSub
+// ---------------------------------
+Sub ProcedureDisplay
+
+If not vRealInstructions
+	Display 'Detailed instructions do not yet exist... Sorry!';
+	LeaveSub;
+EndIf
+
+New ESystem NewVar(vSys);
+Set vRegKey = 'Software\Microsoft\Windows\CurrentVersion\App Paths\Acrobat.exe';
+Run vSys.GetRegistryKeyValue Group('LocalMachine') Key(vRegKey)
+ValueName('') NewVar(vAcrobatExe);
+If (vAcrobatExe)
+	Run vSys.ExtractPathName FullPath(vAcrobatExe) NewVar(vAcrobatPath);
+Else
+	Display 'Acrobat not found. Not installed? ';
+	leaveSub;
+EndIf
+Delete Object(vSys);
+
+Run eSys.RunProgram CommandLine(vAcrobatPath+'Acrobat.exe "'+vRealInstructions+'"') Wait(1) NewVar(exitCode);
+
+EndSub
+//----------------------------------------------------------------------------
+
+Sub BKMDocDisplay
+
+/*
+If not sFinalSteps[i+2]
+	Display 'That document does not seem to exist... Sorry!';
+	LeaveSub;
+EndIf
+*/
+//    Run GetConditionList;
+Set Session.IsInFront = True;
+
+Set vControl = EControlVar;
+
+Find Member(vControl.name) InList(sFinalSteps)	ReturnPos(vIndex);
+Get Member Number(vIndex+2) From(sFinalSteps) NewVar(vDocumentName);
+
+New ESystem NewVar(vSys);
+Set vRegKey = 'Software\Microsoft\Windows\CurrentVersion\App Paths\Acrobat.exe';
+Run vSys.GetRegistryKeyValue Group('LocalMachine') Key(vRegKey)
+ValueName('') NewVar(vAcrobatExe);
+If (vAcrobatExe)
+	Run vSys.ExtractPathName FullPath(vAcrobatExe) NewVar(vAcrobatPath);
+Else
+	Display 'Acrobat not found. Not installed? ';
+	leaveSub;
+EndIf
+Delete Object(vSys);
+
+Run eSys.RunProgram CommandLine(vAcrobatPath+'Acrobat.exe "'+vDocumentName+'"') Wait(1) NewVar(exitCode);
+
+EndSub
+//----------------------------------------------------------------------------
+Sub StoreTheLocation
+	Set vProcDialogLeft = oProcedureDialog.ActualLeft;
+	Set vProcDialogTop = oProcedureDialog.ActualTop;
+	Set vProcDialogWidth = oProcedureDialog.ActualWidth;
+EndSub
+// ---------------------------------------------------------------------------
+Sub MoveButtons
+	Set oProcedureDialog['PDFButton'].Left =((oProcedureDialog.actualwidth-oProcedureDialog.ncwidth)-((oProcedureDialog.actualwidth-oProcedureDialog.ncwidth)/2)-125);	
+	Run oProcedureDialog.RecalcLayout;
+EndSub
+
+// ---------------------------------------------------------------------------
+//!REVHIST=[11-16-2011] Added a "BOLDHEADING" formatting level
+//!REVHIST=[05-10-2012] Added a "PDF" option for displaying instructional materials like BKMs
+//!REVHIST=[05-22-2012] Re-designed the dialog box so it so makes sense for displaying steps or BKM documents.

@@ -1,0 +1,18 @@
+// get current user info to find fscript.ini file
+
+Set vuserSettingsIni = EslSession.UserSettingsDir+'\fscript.ini';
+
+display vuserSettingsIni;
+
+Run eSys.GetIniKeyValue File(vuserSettingsIni)
+  Section('General') Key('Encoding') NewVar(vEncodingType);
+
+Display vEncodingType;
+
+Run eSys.SetINIKeyValue File(vuserSettingsIni)
+Section('General') Key('Encoding') Value('UTF-8');
+
+Run eSys.GetIniKeyValue File(vuserSettingsIni)
+  Section('General') Key('Encoding') NewVar(vEncodingType);
+
+Display vEncodingType;

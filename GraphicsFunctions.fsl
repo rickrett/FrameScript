@@ -1,0 +1,210 @@
+Function RenameAllFrameGraphicText Using oDoc
+/*
+Usage:
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') ValueName('InstallScriptPath') NewVar(sInstalledScriptPath);// Get the path of the root install script (stored in the registry)
+	New ScriptVar NewVar(scriptGeneralFunctions) File(sInstalledScriptPath+'_HelperScripts_nomenu\GraphicsFunctions.fsl');
+	Set vFigureTypeName = scriptGeneralFunctions.RenameAllFrameGraphicText{oDoc};
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+Set vUniqueGraphicName = 'zz_{uniquegraphicparaname_donotmap}';
+Get Object Type(PgfFmt) Name(vUniqueGraphicName)
+	NewVar(otestparaname) DocObject(oDoc);
+If (otestparaname) 
+	Display 'The filename '+vUniqueGraphicName+' should not exist for this script to work. '+
+			'If it does, graphic text formatting would be changed.'+charlf+charlf+
+			'Quitting without making changes to document: '+oDoc.name;
+	LeaveSub; 
+EndIf
+
+// Set a local document variable.
+Local oGraphObj(NULL), vAFrame(NULL), vGraphic(NULL);
+
+//-- Graphic in Doc:
+Set oGraphObj = oDoc.FirstGraphicInDoc;
+Loop While(oGraphObj)
+	Set oGraphObjNext = oGraphObj.NextGraphicInDoc;
+	If oGraphObj.Objectname = 'AFrame' 
+//		Run RenameGraphicText vAFrame(oGraphObj);
+		Set vGraphic = oGraphObj.FirstGraphicInFrame;
+		// Set vGraphic = vTextFrame.FirstGraphicInFrame;
+		Loop While(vGraphic)
+
+			Set vGraphicNext = vGraphic.NextGraphicInFrame;
+			If (vGraphic.firstpgf.text not '');
+				//-- Paragraph in TextObj:
+				Set vPgf = vGraphic.firstpgf;
+				Loop While(vPgf)
+					Set vPgfNext = vPgf.NextPgfInFlow;
+					Set vPgf.name = vUniqueGraphicName;
+					Set vPgf = vPgfNext;
+				EndLoop
+			EndIf
+			Set vGraphic = vGraphicNext;
+		EndLoop
+
+
+	EndIf
+	Set oGraphObj = oGraphObjNext;
+EndLoop
+
+	
+EndFunction
+
+//--------------------------------------------------------------------
+Function FindOverflows Using oDoc, sOverflowedPGFs
+/*
+Usage:
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') ValueName('InstallScriptPath') NewVar(sInstalledScriptPath);// Get the path of the root install script (stored in the registry)
+	New ScriptVar NewVar(scriptGeneralFunctions) File(sInstalledScriptPath+'_HelperScripts_nomenu\GraphicsFunctions.fsl');
+	Set vFigureTypeName = scriptGeneralFunctions.FindOverflows{oDoc};
+	
+RETURNS:  A textbox OBJECT that is overflowed. To see paragraph, see  "vGraphic.FirstPgf.TextRange.Begin"
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+
+// Set a local document variable.
+Local oGraphObj(NULL), vAFrame(NULL), vGraphic(NULL);
+
+//-- Graphic in Doc:
+Set oGraphObj = oDoc.FirstGraphicInDoc;
+Loop While(oGraphObj)
+	Set oGraphObjNext = oGraphObj.NextGraphicInDoc;
+	If oGraphObj.Objectname = 'AFrame' 
+//		Run StopOnOverflow vAFrame(oGraphObj) sOverflowedPGFs(sOverflowedPGFs);
+		Set vGraphic = oGraphObj.FirstGraphicInFrame;
+		Loop While(vGraphic)
+		
+			Set vGraphicNext = vGraphic.NextGraphicInFrame;
+			If vGraphic.firstsubcol.overflowed = 1
+			display vGraphic.frameparent.textloc.object;
+				Set oOverridePGF = vGraphic.frameparent.textloc.object;
+				Set vOverflowparatext = oOverridePGF.pgfnumber+' '+oOverridePGF.text;
+				Find Member(vOverflowparatext) InList(sOverflowedPGFs)
+					ReturnStatus(vFoundinList);
+				If not vFoundinList
+					Add Member(vOverflowparatext) To (sOverflowedPGFs);
+				EndIf	
+			EndIf
+			Set vGraphic = vGraphicNext;
+		EndLoop
+
+
+
+	EndIf
+	Set oGraphObj = oGraphObjNext;
+EndLoop
+
+Set RESULT = sOverflowedPGFs;
+
+
+EndFunction
+
+//--------------------------------------------------------------------
+
+Sub StopOnOverflow
+Set vGraphic = vAFrame.FirstGraphicInFrame;
+// Set vGraphic = vTextFrame.FirstGraphicInFrame;
+Loop While(vGraphic)
+	Set vGraphicNext = vGraphic.NextGraphicInFrame;
+	If vGraphic.firstsubcol.overflowed = 1
+		Set oOverridePGF = vGraphic.frameparent.textloc.object;
+//		If vGraphic.frameparent.textloc.object = PGF  // doesn't work... 
+			Set vOverflowparatext = oOverridePGF.pgfnumber+' '+oOverridePGF.text;
+			Find Member(vOverflowparatext) InList(sOverflowedPGFs)
+				ReturnStatus(vFoundinList) ReturnPos(iOverridePOS);
+			If not vFoundinList
+				Add Member(vOverflowparatext) To (sOverflowedPGFs);
+				Add Member('1') To (sOverflowedPGFs);
+			Else
+				Get Member Number(iOverridePOS+1) From(sOverflowedPGFs) NewVar(vOverrideMember);
+				display vOverrideMember+charlf+vOverrideMember+1;
+				Replace Member Number(iOverridePOS+1) In(sOverflowedPGFs) With(vOverrideMember+1);
+				
+			EndIf	
+//		EndIf
+// ORIGINAL VERSION JUST STOPS AND TELLS YOU TO FIX IT...	
+//		If Displaying = 0
+//			Set Displaying = 1
+//		EndIf;
+//		Find TextRange(vGraphic.FirstPgf.TextRange.Begin) ScrollTo;
+//		Display 'Found an overflowed graphic textbox. Please fix, and re-run.'+charlf+charlf+'In:   '+quote+vGraphic.FirstPgf.text+quote;
+//		Update DocObject(activedoc) Redisplay Hyphenating;
+//		Set oOverflowGraphic = vGraphic;		
+//		LeaveSub;
+	EndIf
+	Set vGraphic = vGraphicNext;
+EndLoop
+
+EndSub
+
+//--------------------------------------------------------------------
+
+Sub RenameGraphicText
+
+Set vGraphic = vAFrame.FirstGraphicInFrame;
+// Set vGraphic = vTextFrame.FirstGraphicInFrame;
+Loop While(vGraphic)
+
+	Set vGraphicNext = vGraphic.NextGraphicInFrame;
+	If (vGraphic.firstpgf.text not '');
+		//-- Paragraph in TextObj:
+		Set vPgf = vGraphic.firstpgf;
+		Loop While(vPgf)
+			Set vPgfNext = vPgf.NextPgfInFlow;
+			Set vPgf.name = vUniqueGraphicName;
+			Set vPgf = vPgfNext;
+		EndLoop
+	EndIf
+	Set vGraphic = vGraphicNext;
+EndLoop
+
+EndSub
+
+//--------------------------------------------------------------------
+
+Function MoveTextLineToTextFrame oTextlinePgf
+//
+Local oTextlinePgf(0), vParent(0), vLocX(0) vLocY(0) 
+		vtlTextRange(0) vtlParent(0) vtlGraphic(0) vtlFramePgf(0);
+ 
+
+If (not activedoc) LeaveSub; EndIf
+
+Set oTextlinePgf = Currentpgf;
+
+If (oTextlinePgf.ObjectName = 'TextLine')
+
+	Set vtlParent = oTextlinePgf.Frameparent;
+	Set vLocX = oTextlinePgf.basepointx;
+	Set vLocY = oTextlinePgf.basepointy;
+
+
+	New TextRange NewVar(vtlTextRange) Object(oTextlinePgf)
+	  Offset(0) Offset(ObjEndOffset);
+
+	Set textselection = vtlTextRange;
+	Cut Text DocObject(activedoc);
+//	Copy Text DocObject(oDoc);	
+	
+	New TextFrame ParentObject(vtlParent) NewVar(vtlGraphic);
+	Set vtlFramePgf = vtlGraphic.firstpgf.textrange.begin;
+	Set textselection = vtlFramePgf;
+	Paste Text DocObject(activedoc);
+	
+//	write vGraphic.properties;
+	Set vtlGraphic.locX = vLocX;
+	Set vtlGraphic.locY = vLocY - 7;
+	Set vtlGraphic.height = vtlFramePgf.fontsize;
+	
+	// fix overflow
+	Loop until (vtlGraphic.firstsubcol.overflowed = 0)
+		Set vtlGraphic.width = vtlGraphic.width+10;
+	EndLoop
+			
+EndIf
+
+EndFunction
+
+//!REVHIST=[05-28-2013] Added function to cut and paste selected textline text into a text frame, and place text frame in same location

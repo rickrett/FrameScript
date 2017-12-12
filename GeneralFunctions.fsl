@@ -1,0 +1,1438 @@
+
+Function ScanMasterTable Using vStyleType, vStyleNameParameter
+/*
+Usage:
+
+Send this function a style name and it will return the value from the main batch file look up table.
+
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') ValueName('InstallScriptPath') NewVar(sInstalledScriptPath);// Get the path of the root install script (stored in the registry)
+New ScriptVar NewVar(vBatchScript) File(sInstalledScriptPath+'_HelperScripts_nomenu\GeneralFunctions.fsl');
+Set vFigureTypeName = vBatchScript.ScanMasterTable{'T','Figure'};
+
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+
+// Set a local document variable.
+Local 	sBatchFile(NULL), oBatchFile(NULL), vLookupTbl(NULL), 
+		vFoundTableTagLookup(NULL), vTableTagRow(NULL), vTableTagSecondCell(NULL);
+// Run ESys.GetRegistryKeyValue Key('InstallScriptPath') ValueName('InstallScriptPath') NewVar(sInstalledScriptPath);// Get the path of the root install script (stored in the registry)
+If not vTemplatePath
+	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
+EndIf
+Set sBatchFile = vTemplatePath+dirsep+'Mapping_Batchfile.fm';
+Set oBatchFile = OpenADoc{sBatchFile,'None',0,1,0};
+
+//-- Find The Correct Table. Error out if not found
+Set vLookupTbl = oBatchFile.FirstTblInDoc;
+Loop While(vLookupTbl)
+	If (vLookupTbl.Page.ObjectName = 'BodyPage')
+		Find String('Master Batch File') InString(vLookupTbl.Firstpgf.text) nocase ReturnStatus(vFoundTableTagLookup);
+		If vFoundTableTagLookup
+			Set vTableTagRow = vLookupTbl.FirstRowInTbl;
+			Loop While(vTableTagRow)
+				If (vTableTagRow.RowType = RowBody) // RowBody RowHeading RowFooting
+					If vTableTagRow.FirstCellInRow.FirstPgf.Text = vStyleType
+						Set vTableTagSecondCell = vTableTagRow.FirstCellInRow.NextCellinRow;
+						If (vTableTagSecondCell.FirstPgf.text = vStyleNameParameter)			
+							Set Result = vTableTagSecondCell.NextCellInRow.text;
+							Close Doc DocObject(oBatchFile) IgnoreMods;
+							LeaveSub;
+						EndIf
+					EndIf
+				EndIf //-- RowBody
+				Set vTableTagRow = vTableTagRow.NextRowInTbl;
+			EndLoop //-- Row
+			LeaveLoop;
+		EndIf
+	EndIf //-- BodyPage
+	Set vLookupTbl = vLookupTbl.NextTblInDoc;
+EndLoop //-- Table
+If not vFoundTableTagLookup
+	Display 'Could not find the look up table in the Master Batch File. Please ensure it exists.';
+	Close Doc DocObject(oBatchFile) IgnoreMods;
+	LeaveEvent;
+EndIf
+
+Display 'The style I was looking for does not exist in the master mapping file.'+charlf+
+		'Format type: '+vStyleType+charlf+'Style name: '+vStyleNameParameter;
+Close Doc DocObject(oBatchFile) IgnoreMods;	
+// LeaveScript;
+EndFunction
+//--------------------------------------------------------------------
+
+/*
+
+**THIS IS IMPRACTICAL NOW THAT THE DIALOG BOX ISN'T THERE
+
+Function ProcessCustomerDocuments Using oTestBook vTestCustomerNameString
+//
+//Usage: Set vResult = ProcessCustomerDocuments{oBook,vTestCustomerNameString};
+//
+//vTestCustomerNameString should be in the form of 
+//  "John Smith,Cisco,For Cisco on 20 Sept 2011" 
+//or 
+//  ",Cisco,For Cisco on 20 Sept 2011"  -- if you don't want a customer personal name 
+//
+Set vCustomerDocFileName = '_Customer-Docs-Printed.dat';
+
+Run eSys.ExtractPathName FullPath(oTestBook) NewVar(vTestBookPath);
+Run eSys.FileExist FileName(vTestBookPath+vCustomerDocFileName) NewVar(vDatFileStatus);
+
+if not vDatFileStatus
+	New EFileInfo NewVar(einfo) FileName(vTestBookPath+vCustomerDocFileName);
+EndIf
+
+Set intVal = eStr.SaveToTextFile{vTestCustomerNameString,vTestBookPath+vCustomerDocFileName[,'APPEND']};
+
+EndFunction
+
+*/
+
+//----------------------------------------------------
+Function UnicodeConverter Using oParaDoc
+/*
+Usage: Pass a pargraph object. 
+
+       Script will search for Ohm and microsymbol and convert them to Unicode. 
+       It will also remove the symbol character tag from items that are fixed.
+       All other character formats will be remain unchanged.
+       If symbol is conditionalized, it will be retained.
+*/
+
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+Set vSymbolCharScanName = vBatchScript.ScanMasterTable{'C','Symbol'};
+Set vSymbolVarScanName = vBatchScript.ScanMasterTable{'V','Symbol:Omega (Ohm)'};
+New String NewVar(sDefPara) IntValue(182);
+
+New StringList NewVar(sSymbolCodes) // micro symbol
+	Value(87S) Value(109S);
+
+New StringList NewVar(sUnicodeCodes) // Ohm symbol
+	Value(937S) Value(181S);
+	
+// first, fix Ohm variable
+Get Object Type(VarFmt) Name(vSymbolVarScanName)
+	NewVar(oSymbolVar) DocObject(oDoc);
+
+If (oSymbolVar)
+	Set vOhmSymbolFormat = '<Default '+sDefPara+' Font>'+937S+'<Default '+sDefPara+' Font>';
+	Set oSymbolVar.fmt = vOhmSymbolFormat;
+
+Else
+	Display 'The '+quote+vSymbolVarScanName+quote+' variable does not exist in this document so it will not be updated.';
+EndIf	
+
+Find Member('Symbol') InList(FontFamilyNames) ReturnPos(vFamily);//FontFamilyNames
+Set vFamily = vFamily-1; //  need to -1 to get to correct value
+
+
+Set oParaFlow = oParaDoc.MainFlowInDoc;
+// Find the first paragraph in the flow.
+Set oParaPgf = oParaFlow.FirstPgfInFlow;
+// Loop through the paragraphs.
+Loop While(oParaPgf)
+	// Use this section to skip paragraphs that are part of text insets 
+	// (mainly to skip TOC/LOT/LOF text insets in the front matter)
+	Get TextList InObject(oParaPgf) TextInsetBegin NewVar(vTITextlist);
+	If vTITextlist.Count > 0
+		Get Member Number(1) From(vTITextlist) NewVar(vTi);
+		Set vTi = vTi.TextData;
+		Set oParaPgfNext = vTi.TextRange.End.Object;
+		If (oParaPgfNext = oParaPgf)
+			Set oParaPgf = oParaPgfNext.NextPgfInFlow;
+		Else
+			Set oParaPgf = oParaPgfNext;
+		EndIf
+	Else
+		Run TestandFixSymbols oParaPgf(oParaPgf);
+		// Now test for tables in the paragraph.
+		Get TextList InObject(oParaPgf) NewVar(vTlist) TblAnchor;
+		// If there are one or more tables, this loop will be entered.
+		Loop While (x <= vTlist.Count) LoopVar(x) Init(1) Incr(1)
+			Get Member Number(x) From(vTlist) NewVar(vTblAnchor);
+			Set oTbl = vTblAnchor.TextData;
+			// Test for a table title.
+			If oTbl.FirstPgf
+				Set oParaCellPgf = oTbl.FirstPgf
+				// Loop through table title paragraphs.
+				Loop While(oParaCellPgf)
+					Run TestandFixSymbols oParaPgf(oParaCellPgf);
+					Set oParaCellPgf = oParaCellPgf.NextPgfInFlow;
+				EndLoop
+			EndIf
+			// Go to the first cell in the table.
+			Set oParaCell = oTbl.FirstRowInTbl.FirstCellInRow;
+			// Move from cell-to-cell.
+			Loop While(oParaCell)
+					Set oParaCellPgf = oParaCell.FirstPgf;
+					// Loop through each paragraph in the cell.
+					Loop While(oParaCellPgf)
+						Run TestandFixSymbols oParaPgf(oParaCellPgf);
+						Set oParaCellPgf = oParaCellPgf.NextPgfInFlow;
+					EndLoop
+					Set oParaCell = oParaCell.NextCellInTbl;
+			EndLoop
+		EndLoop
+  		Set oParaPgf = oParaPgf.NextPgfInFlow;
+  	EndIf
+EndLoop
+
+
+
+EndFunction
+
+
+
+
+
+
+
+
+//---------------------------------------
+Sub TestandFixSymbols
+
+display oParaDoc.text;
+
+Loop While(f <= sSymbolCodes.Count) LoopVar(f) InitVal(1) Incr(1)
+	Find String(sSymbolCodes[f]) inobject(oParaPgf)
+	  ReturnStatus(vFontStatus) ReturnRange(vTRCharacter);
+
+	Loop While(vFontStatus)
+		Find TextRange(vTRCharacter) ScrollTo;
+		Get TextProperties NewVar(vTRCharPropList) TextLoc(vTRCharacter.begin)
+		If (vTRCharPropList.fontfamily = vfamily)
+		
+			Get Object Type(PgfFmt) Name(oParaPgf.name)
+			  NewVar(vParaDocObject) DocObject(oParaDoc);
+			If (not vParaDocObject) LeaveSub; EndIf
+		
+			Remove Property(FontFamily) From(vTRCharPropList);
+			Remove Property(FontPlatformName) From(vTRCharPropList);
+			Remove Property(FontPostscriptName) From(vTRCharPropList);
+			Remove Property(FontEncodingName) From(vTRCharPropList);
+
+			Add Property FontFamily(vParaDocObject.fontfamily) To(vTRCharPropList);
+
+			If vTRCharPropList.chartag = vSymbolCharScanName
+				Remove Property(CharTag) From(vTRCharPropList);
+				Add Property CharTag(vBodyCharTag) To(vTRCharPropList);
+			EndIf	
+
+			Set vNewCharLoc = vTRCharacter.begin;
+			Delete Text TextRange(vTRCharacter);
+
+			New Text	TextLoc(vNewCharLoc) NewVar(vTextLocEnd) sUnicodeCodes[f];
+
+			New TextRange NewVar(vTextRange) Object(oParaPgf)
+				Offset(vTextLocEnd.offset-1) Offset(vTextLocEnd.offset);
+				
+//			Find textrange(vtextrange) scrollto;
+				
+			Apply TextProperties
+				TextRange(vTextRange) // DocObject(vDoc)
+				Properties(vTRCharPropList);
+		EndIf
+
+		Find String(sSymbolCodes[f]) inobject(oParaPgf) start(vTRCharacter.end) // probably should add  "start(vTRCharacter.end)"
+		  ReturnStatus(vFontStatus) ReturnRange(vTRCharacter);
+	EndLoop
+EndLoop
+
+EndSub
+//--------------------------------------------------------------------
+
+Function GetRevisionHistoryDocandTable  oCurrentBook
+
+// Initialize the Result variable.
+Set Result = NULL;
+Set oRHTbl = 0;
+Set oRHDoc = 0;
+
+Set oRevisionHistoryTable = ProcessBook{oCurrentBook,'GetRevHistTbl'};
+
+display oRevisionHistoryTable;
+
+
+EndFunc;
+//--------------------------------------------------------------------
+Function VerifyRevHistoryDate oCurrentBook vPassedDate
+// VerifyRevHistoryDate{oBook,vDate};
+// Look through passed book for rev. history table. Get date from top entry. compare to date passed.
+// If no date passed, offer a dialog to update the date (show existing date in dialog)
+
+// Initialize the Result variable.
+Set Result = NULL;
+Set oRHTbl = 0;
+Set oRHDoc = 0;
+// Set a local document variable.
+//Local sRevHistoryTable(NULL)
+
+New StringList NewVar(sRevHistoryTable); // needs to capture file path, table, and date to return to main script
+Set vNewDate = vPassedDate;
+
+/*
+If oCurrentBook
+	Set vPath = ParseFilePath{oCurrentBook.name,'Path'};
+Else
+	Set Result = 0;
+	LeaveSub;	
+EndIf
+*/
+Set oRevisionHistoryTable = ProcessBook{oCurrentBook,'GetRevHistTbl'};
+
+display oRHTbl;
+
+If oRHDocName
+	Set oFinalRHDoc = OpenADoc{oRHDocName,'None',1,1,1};
+	Set TextSelection = oRHTbl.firstrowintbl.firstcellinrow.firstpgf.begin;
+	Set Result = oRHTbl;
+Else
+	Display 'The revision history table could not be found in the book. Formatting issue?';
+EndIf
+/* This does work... not sure if it is doing too much for this general functions script... I want the routines to be pretty generic
+// Set sResult = ProcessBook{oCurrentBook,'FindRevHistory',0};
+If sResult not= 0
+	 MsgBox sResult + ' book components were not processed.    '+CHARLF+
+		'See the Console window for details.    ';
+	Set Result = 0;
+	LeaveSub;
+EndIf
+Set Result = sRevHistoryTable;
+*/
+EndFunction
+//--------------------------------------------------------------------
+
+Function GetRevHistTbl oCurrentDoc 
+
+// Initialize the Result variable.
+Set Result = NULL;
+
+Local vFirstRevTblCellPgf(0);
+
+	Set oRevPgf = oCurrentDoc.FirstPgfInMainFlow;
+
+	Loop While(oRevPgf)
+		Set oRevPgfNext = oRevPgf.NextPgfInFlow;
+			If oRevPgf.Text = 'Revision History'
+				Set oFindFirstRevHistPgf = oRevPgf;
+				Loop While(oFindFirstRevHistPgf)
+					Set oFindFirstRevHistPgfNext = oFindFirstRevHistPgf.NextPgfInFlow;
+					// Now test for tables in the paragraph.
+					Get TextList InObject(oFindFirstRevHistPgf) NewVar(vRevHistTlist) TblAnchor;
+					// If there are one or more tables, this loop will be entered.
+					Loop While (r <= vRevHistTlist.Count) LoopVar(r) Init(1) Incr(1)
+						Set oRevHistTbl = vRevHistTlist[r].textdata;
+						Set vTopRevHistCell = oRevHistTbl.firstrowintbl.firstcellinrow;
+						Set oCellPgf = vTopRevHistCell.firstpgf;
+						Loop While(oCellPgf)
+							Find String('Revision Date: ')
+								InObject(oCellPgf) ReturnRange(vTRFound);
+							If vTRFound
+								Set Result = oRevHistTbl;
+								Leavesub;
+							EndIf
+							Set oCellPgf = oCellPgf.NextPgfInFlow;
+						EndLoop
+					EndLoop
+					Set oFindFirstRevHistPgf = oFindFirstRevHistPgfNext;
+				EndLoop
+			EndIf
+		Set oRevPgf = oRevPgfNext;
+	EndLoop					
+
+
+EndFunc;
+
+//--------------------------------------------------------------------
+
+Sub FindTheFirstRevTable
+
+	Set oRevPgf = oCurrentDoc.FirstPgfInMainFlow;
+
+
+	Loop While(oRevPgf)
+		Set oRevPgfNext = oRevPgf.NextPgfInFlow;
+			If oRevPgf.Text = 'Revision History'
+				Set oFindFirstRevHistPgf = oRevPgf;
+				Loop While(oFindFirstRevHistPgf)
+					Set oFindFirstRevHistPgfNext = oFindFirstRevHistPgf.NextPgfInFlow;
+					// Now test for tables in the paragraph.
+					Get TextList InObject(oFindFirstRevHistPgf) NewVar(vRevHistTlist) TblAnchor;
+					// If there are one or more tables, this loop will be entered.
+					Loop While (r <= vRevHistTlist.Count) LoopVar(r) Init(1) Incr(1)
+						Set vRevHistTbl = vRevHistTlist[r].textdata;
+						Set vTopRevHistCell = vRevHistTbl.firstrowintbl.firstcellinrow;
+						Set oCellPgf = vTopRevHistCell.firstpgf;
+						Loop While(oCellPgf)
+							Find String('Revision Date: ')
+								InObject(oCellPgf) ReturnRange(vTRFound);
+							If vTRFound
+								Set vFirstRevTblCellPgf = oCellPgf.text;
+								Leavesub;
+							EndIf
+							Set oCellPgf = oCellPgf.NextPgfInFlow;
+						EndLoop
+					EndLoop
+					Set oFindFirstRevHistPgf = oFindFirstRevHistPgfNext;
+				EndLoop
+			EndIf
+		Set oRevPgf = oRevPgfNext;
+	EndLoop					
+	
+EndSub
+//--------------------------------------------------------------------
+
+/*
+Sub OLDGetRevHistTbl Returns oRHDoc, 
+
+If not oRHTbl
+	Set oRevPgf = oDoc.FirstPgfInMainFlow;
+	Loop While(oRevPgf)
+		Set oRevPgfNext = oRevPgf.NextPgfInFlow;
+			If oRevPgf.Text = 'Revision History'
+				Set oFindFirstRevHistPgf = oRevPgf;
+				
+				Loop While(oFindFirstRevHistPgf)
+					Set oFindFirstRevHistPgfNext = oFindFirstRevHistPgf.NextPgfInFlow;
+					// Now test for tables in the paragraph.
+					Get TextList InObject(oFindFirstRevHistPgf) NewVar(vRevHistTlist) TblAnchor;
+					// If there are one or more tables, this loop will be entered.
+					Loop While (r <= vRevHistTlist.Count) LoopVar(r) Init(1) Incr(1)
+	//					Get Member Number(r) From(vRevHistTlist) NewVar(vRevHistTblAnchor);
+						Set vRevHistTbl = vRevHistTlist[r].textdata;
+						Set vTopRevHistCell = vRevHistTbl.firstrowintbl.firstcellinrow;
+						Set oCellPgf = vTopRevHistCell.firstpgf;
+						Loop While(oCellPgf)
+							Find String('Revision Date: ')
+								InObject(oCellPgf) ReturnRange(vTRFound);							
+							If vTRFound
+								Set textselection = vRevHistTbl.firstrowintbl.firstcellinrow.firstpgf.begin;
+								Set oRHDoc = oDoc;
+								Set oRHDocName = oDoc.name;
+								Set Result = oRHTbl;
+								LeaveSub;
+							EndIf
+							Set oCellPgf = oCellPgf.NextPgfInFlow;
+						EndLoop
+					EndLoop
+					Set oFindFirstRevHistPgf = oFindFirstRevHistPgfNext;
+				EndLoop
+			EndIf
+		Set oRevPgf = oRevPgfNext;
+	EndLoop				
+EndIf
+
+
+EndSub
+*/
+
+//--------------------------------------------------------------------
+/* This routine worked (sort of), but really does too much for this general functions script
+Sub FindRevHistory
+
+// passed: sRevHistoryTable and vNewDate;
+//oDoc
+//-- Paragraph in MainFlow:
+If sRevHistoryTable.count > 0 // skip if already discovered... could find a way to not look through other files I suppose
+	LeaveSub;
+EndIf
+
+Set oRevPgf = oDoc.FirstPgfInMainFlow;
+Loop While(oRevPgf)
+	Set oRevPgfNext = oRevPgf.NextPgfInFlow;
+		If oRevPgf.Text = 'Revision History'
+			Set oFindFirstRevHistPgf = oRevPgf;
+			Loop While(oFindFirstRevHistPgf)
+				Set oFindFirstRevHistPgfNext = oFindFirstRevHistPgf.NextPgfInFlow;
+				// Now test for tables in the paragraph.
+				Get TextList InObject(oFindFirstRevHistPgf) NewVar(vRevHistTlist) TblAnchor;
+				// If there are one or more tables, this loop will be entered.
+				Loop While (r <= vRevHistTlist.Count) LoopVar(r) Init(1) Incr(1)
+//					Get Member Number(r) From(vRevHistTlist) NewVar(vRevHistTblAnchor);
+					Set vRevHistTbl = vRevHistTlist[r].textdata;
+					Set vTopRevHistCell = vRevHistTbl.firstrowintbl.firstcellinrow;
+					Set oCellPgf = vTopRevHistCell.firstpgf;
+					Loop While(oCellPgf)
+						Find String('Revision Date: ')
+							InObject(oCellPgf) ReturnRange(vTRFound);
+					  If vTRFound
+							New TextRange NewVar(vRevDateTR) Object(oCellPgf)
+								Offset(vTRFound.end.offset) Offset(ObjEndOffset-1);
+							Add Member(oDoc.name) To(sRevHistoryTable);
+							Add Member(vRevHistTbl.unique) To(sRevHistoryTable);
+							Add Member(vRevDateTR.text) To(sRevHistoryTable);
+
+							If vNewDate
+								
+								Set vString = 'Replace '+quote+vRevDateTR.text+quote+' with the following date?';
+								DialogBox Type(String) Title(vString)
+									Init(vNewDate) NewVar(vString) Button(vButton);
+								If (vButton = OkButton)
+									//delete the string and add this one...
+								
+								EndIf
+							EndIf	
+							
+						EndIf
+						Set oCellPgf = oCellPgf.NextPgfInFlow;
+					EndLoop
+				EndLoop
+				Set oFindFirstRevHistPgf = oFindFirstRevHistPgfNext;
+			EndLoop
+		
+		EndIf
+	Set oRevPgf = oRevPgfNext;
+EndLoop
+
+EndSub
+//--------------------------------------------------------------------
+*/
+
+Function ResolveDate vSubmittedDate
+
+/* Possible date formats:
+
+02 Jan 2012
+02 January 2012
+02-02-2012
+02-02-12
+02-2-2012
+02-2-12
+2-02-12
+2-2-12
+2-2-2012
+
+2 January 2012
+2 Jan 2012
+2 January 2012
+02 January 2012
+02 Jan 2012
+
+...
+
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local sLongMonthList(0), sShortMonthList(0), u(0)
+
+// New StringList NewVar(sSplitDate);
+
+New StringList NewVar(sLongMonthList)
+	Value('January') Value('February') Value('March')
+	Value('April') Value('May') Value('June')
+	Value('July') Value('August') Value('September')
+	Value('October') Value('November') Value('December');
+	
+New StringList NewVar(sShortMonthList)
+	Value('Jan') Value('Feb') Value('Mar')
+	Value('Apr') Value('May') Value('Jun')
+	Value('Jul') Value('Aug') Value('Sept')
+	Value('Oct') Value('Nov') Value('Dec');	
+
+Find String('-') InString(vSubmittedDate) ReturnStatus(vFoundDashes);
+If vFoundDashes
+
+// do something here... break down by dashes
+// then figure out the pieces
+	Set sSplitDate = eStr.ToStringList{vSubmittedDate,'-'};
+
+EndIf
+
+Find String(' ') InString(vSubmittedDate) ReturnStatus(vFoundSpaces);
+If vFoundSpaces
+	// split the "date" results discovered into pieces
+	Set sSplitDate = eStr.ToStringList{vSubmittedDate,' '};
+EndIf
+
+// Validate the sSplitDate stringlist to make sure it is valid "enough" to process
+		If not sSplitDate
+			Set sSplitDate = -1; // -1 = Could not split the document (no spaces or dashes)
+			Set Result = vERRDate;
+			Leavesub;
+		EndIf
+
+		If sSplitDate.count not=3
+			Set sSplitDate = -2; // -2 = too many "sections" in the date retrieved
+			Set Result = vERRDate;
+			Leavesub;
+		EndIf
+
+
+	// Set the regular expression parameters.
+	// Match along the entire string.
+	Set oRegex.Global = True;
+	// Set the pattern to match.
+	Set oRegex.Pattern = '\d{4}';  // serch for 4 digits together (this is the same as "\d\d\d\d")
+
+	// Test for a match.
+	If oRegex.Test{vSubmittedDate}
+	  // Execute all matches along the string.
+	  Set oMatch = oRegex.Execute{vSubmittedDate};
+	  // Loop through the matches.
+	  If oMatch.Count = 1
+			Set vYearFound = oMatch[0].Value;
+	  		// Set vYearFound = oMatch[oMatch.Count].value;
+	  	Else
+	  		Set sSplitDate = -3 // -3 = Year could not be found because there was not exactly 1 four-digit item in the date list.
+	  		Set Result = vERRDate;
+	  		Leavesub;
+	  EndIf	  
+	EndIf
+
+//display vYearFound;
+
+	Loop While(g <= sLongMonthList.Count) LoopVar(g) InitVal(1) Incr(1)
+		Loop While(f <= sSplitDate.Count) LoopVar(f) InitVal(1) Incr(1)
+			If (sSplitDate[f] = sLongMonthList[g]) or (sSplitDate[f] = sShortMonthList[g])
+				Set vMonthFound = sSplitDate[f];
+				Set vMonthloc = f;
+			EndIf
+		EndLoop				
+	EndLoop
+	
+	If not vMonthFound
+		Set sErrDate = -4 // -4 = Could not find the month (maybe because the month is numeric?)
+		Set Result = vErrDate;
+		Leavesub;
+	EndIf
+
+//display 'Month: '+vMonthFound;
+
+If vYearFound = sSplitDate[3]
+	If vMonthloc = 2
+		Set vDayFound = sSplitDate[1];
+	Else
+		Set vDayFound = sSplitDate[2];
+	EndIf
+
+New StringList NewVar(sOrganizedDate) // day, month, year
+	Value(vDayFound) Value(vMonthFound) Value(vYearFound);
+
+
+
+Set Result = sOrganizedDate;
+
+
+
+/* probably don't need to do this... yet
+//Determine if date submitted starts with digits. If it does, assume this is "day"(?)
+Find String(vDate[1]) InString('0123456789') ReturnStatus(vFoundFirstDigit) returnstring(vFirstDigit);
+If vFoundFirstDigit
+	// assume this is the DAY
+	Find String(vDate[2]) InString('0123456789') ReturnStatus(vFoundSecondDigit) returnstring(vSecondDigit);
+	If vFoundFirstDigit = 0
+*/
+
+EndFunction
+//--------------------------------------------------------------------
+
+Function RemoveVarFormatting Using sFmt
+
+Local Result(NULL); // Initialize the Result variable.
+
+	Set oRegex = InitializeXObject{'VBScript.RegExp'};
+	If oRegex = 0
+	  LeaveSub;
+	EndIf
+	 
+	// Set the regular expression parameters.
+	// Match along the entire string.
+	Set oRegex.Global = True;
+	// Set the pattern to match.
+	Set oRegex.Pattern = '<[^>]+>';
+	 
+	// Test for a match.
+	If oRegex.Test{sFmt}
+	  // Execute all matches along the string.
+	  Set oMatch = oRegex.Execute{sFmt};
+	  // Loop through the matches.
+	  Loop While(vMatchCnt < oMatch.Count) LoopVar(vMatchCnt) Init(0) Incr(1)
+	    // Replace the match with nothing.
+	    Set sFmt = eStr.ReplaceFirst{sFmt,oMatch[vMatchCnt].Value,''};  // This variable must be "sFmt" for the loop to work.
+	  EndLoop
+	EndIf
+
+	Set Result = sFmt;
+
+EndFunction
+//---------------------------------------------------------
+
+Function InitializeXObject sProgId
+//
+Local Result(0);
+ 
+// Create the object.
+New EActiveXObject NewVar(Result) ProgId(sProgId);
+If Result.ErrorCode <> 0
+	Write Console sProgId + ' could not be initialized.';
+	Write Console 'ErrorCode: '+Result.ErrorCode;
+	Set Result = 0;
+EndIf
+//
+EndFunc
+//---------------------------------------------------------
+
+
+Function RenameAllFrameGraphicText Using oDoc
+/*
+Usage:
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') ValueName('InstallScriptPath') NewVar(sInstalledScriptPath);// Get the path of the root install script (stored in the registry)
+	New ScriptVar NewVar(scriptGeneralFunctions) File(sInstalledScriptPath+'_HelperScripts_nomenu\GeneralFunctions.fsl');
+	Set vFigureTypeName = scriptGeneralFunctions.RenameAllFrameGraphicText{oDoc};
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+
+// Set a local document variable.
+Local 	sBatchFile(NULL), oBatchFile(NULL), vLookupTbl(NULL), 
+		vFoundTableTagLookup(NULL), vTableTagRow(NULL), vTableTagSecondCell(NULL);
+
+//-- Graphic in Doc:
+Set oGraphObj = oDoc.FirstGraphicInDoc;
+display '-'+oGraphObj;
+Loop While(oGraphObj)
+	Set oGraphObjNext = oGraphObj.NextGraphicInDoc;
+	If oGraphObj.Objectname = 'AFrame' 
+		Run RenameGraphicText vAFrame(oGraphObj);
+	EndIf
+	Set oGraphObj = oGraphObjNext;
+EndLoop
+
+	
+EndFunction
+
+
+//--------------------------------------------------------------------
+Function CaptionResolver Using oPreflightDoc
+/*
+Description: Find tables or figures without captions and offer to turn them off. Also, flag captions with leading spaces
+
+Usage:
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+	New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+	Set vFixCaptions = vBatchScript.CaptionResolver{oDoc};
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Set vValidLetterList = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"+:/.';
+New String IntValue(213) NewVar(gvsQuoteRight);
+New String IntValue(212) NewVar(gvsQuoteLeft);
+New String IntValue(210) NewVar(gvsQuoteDblLeft);   // “
+New String IntValue(211) NewVar(gvsQuoteDblRight);  // ”
+Set vValidLetterList = vValidLetterList + gvsQuoteRight + gvsQuoteLeft + gvsQuoteDblLeft + gvsQuoteDblRight;
+
+//-- Table/Row/Cell/Pgf:
+Set vTbl = oPreflightDoc.FirstTblInDoc;
+Loop While(vTbl)
+	If (vTbl.Page.ObjectName = 'BodyPage')
+		If vTbl.tbltitleposition not= 0
+			Find String(vTbl.firstpgf.text[1]) InString(vValidLetterList) NoCase ReturnPos(vPos) ReturnStatus(vFound)
+         If not vFound
+            find textrange (vTbl.firstpgf.textrange) scrollto;
+//            Display 'bad table caption?';
+				Set vMsg = 'Bad table caption? Click '+quote+'YES'+quote+' to fix this one, or '+quote+'NO'+quote+' to continue searching.';
+				MsgBox vMsg Button(vButton)	//-- YesNoCancel: [7.0+]
+					Mode(YesNo);
+				If (vButton = YesButton)
+					LeaveScript;
+				EndIf
+
+				
+				DialogBox Type(medit) Title('Fix the caption') Title2('Choose:')
+				  Button3Label('Remove Caption') Button4Label('Delete Leading Spaces')
+              Button(vButton);
+				If (vButton = CancelButton) LeaveScript; EndIf
+				If (vButton = OKButton)
+					
+				EndIf
+				If (vButton = Button3)
+					display 'Remove Caption';	
+				EndIf
+				If (vButton = Button4)
+					Display 'Delete Leading Spaces';	
+				EndIf
+			EndIf
+		EndIf
+
+	EndIf //-- BodyPage
+	Set vTbl = vTbl.NextTblInDoc;
+EndLoop //-- Table
+
+
+
+
+EndFunction
+
+//--------------------------------------------------------------------
+Function AuthorsNotesPreflight Using oPreflightDoc
+/*
+Description: Currently just checks the ShowCondIndicators and ShowAll Flags to ensure you want them turned on/off.
+
+Usage:
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+	New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+	Set vClearCB = vBatchScript.AuthorsNotesPreflight{oBook};
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+
+
+
+
+
+If oPreflightDoc.ShowCondIndicators
+	MsgBox 'Conditional text indicators (colors) are showing in the Authors Notes file. Can we turn off indicators?'
+	  Mode(YesNoCancel) Button(vButton);
+	If (vButton = NoButton) LeaveSub; EndIf
+	If (vButton = CancelButton)
+		Close Doc DocObject(oPreflightDoc) IgnoreMods;
+		Leavescript;
+	EndIf			
+	Set oPreflightDoc.ShowCondIndicators = 0;
+	Save Document DocObject(oPreflightDoc);
+Endif
+
+If oPreflightDoc.ShowAll
+	MsgBox 'The SHOWALL condition setting is on in the Authors Notes file. Turn off SHOWALL?'
+	  Mode(YesNoCancel) Button(vButton);
+	If (vButton = NoButton) LeaveSub; EndIf
+	If (vButton = CancelButton)
+		Close Doc DocObject(oPreflightDoc) IgnoreMods;
+		Leavescript;
+	EndIf	
+	Set oPreflightDoc.showall = 0
+	Save Document DocObject(oPreflightDoc);
+Endif
+
+EndFunction
+//--------------------------------------------------------------------
+
+Function PreflightTools Using oCBBook
+/*
+Usage:
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+	New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+	Set vClearCB = vBatchScript.PreflightTools{oBook};
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local 	vBookComp(NULL), vBookCompNext(NULL), vANFound(NULL);
+		Set vBookComp = oCBBook.FirstComponentInBook;
+		Loop While(vBookComp)
+			Set vBookCompNext = vBookComp.NextComponentInBook;
+//			Set oResult = OpenADoc{vBookComp.Name,'RemoveChangeBars',1,0,0}; // doc-to-open, subroutine,save(0/1),leave open(0/1), make visible(0/1)
+			Set oBatchDoc = OpenADoc{vBookComp.Name,'None',0,1,0};
+//			Run RemoveChangeBars oDoc(oBatchDoc);
+			If oBatchDoc.changebar = 1
+				MsgBox 'Change bars are showing in the document. Do you want to clear them?'
+				  Mode(YesNoCancel) Button (vButton);
+				If (vButton = NoButton) LeaveSub; EndIf
+				If (vButton = CancelButton)
+					Close Doc DocObject(oBatchDoc) IgnoreMods;
+					Leavescript;
+				EndIf
+				
+				clear changebars; // remove  all changebars from document
+				Set oBatchDoc.autochangebars = 0; // turn off autchangebars from document
+				Save Document DocObject(oBatchDoc);
+			EndIf
+
+
+
+			Set sOverflowTables = CheckTablesForOverflows{oBatchBook,sLongTables}; // could add ",oCurrentTbl" to just check the currenttable for issues
+			Set sBlankPages = CheckForBlankPages{oBatchBook,sPageList};
+			Save Document DocObject(oBatchDoc);
+			
+			Close Doc DocObject(oBatchDoc) IgnoreMods;
+			Set vBookComp = vBookCompNext;
+		EndLoop
+
+EndFunction
+
+//--------------------------------------------------------------------
+
+Sub RemoveChangeBars
+
+If odoc.changebar = 1
+//	Set vMsg = 'Change bars are in '+odoc.name+'.'+charlf+charlf+'Do you want to clear them?';
+	MsgBox 'Change bars are showing in the document. Do you want to clear them?'
+	  Mode(YesNo) Button (vButton);
+	If (vButton = NoButton) LeaveSub; EndIf
+	clear changebars; // remove  all changebars from document
+	Set oDoc.autochangebars = 0; // turn off autchangebars from document
+	Save Document DocObject(oDoc);
+	
+	/*
+			could convert changebars to "white" and small to effectively hide them so they aren't lost.
+			probably not worth it.
+	*/
+EndIf	
+
+EndFunction
+
+//--------------------------------------------------------------------
+Function FindOverflows Using oDoc
+/*
+Usage:
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') ValueName('InstallScriptPath') NewVar(sInstalledScriptPath);// Get the path of the root install script (stored in the registry)
+	New ScriptVar NewVar(scriptGeneralFunctions) File(sInstalledScriptPath+'_HelperScripts_nomenu\GeneralFunctions.fsl');
+	Set vFigureTypeName = scriptGeneralFunctions.FindOverflows{oDoc};
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local 	oGraphObj(NULL), vAFrame(NULL), vGraphic(NULL);
+
+//-- Graphic in Doc:
+Set oGraphObj = oDoc.FirstGraphicInDoc;
+Loop While(oGraphObj)
+	Set oGraphObjNext = oGraphObj.NextGraphicInDoc;
+	If oGraphObj.Objectname = 'AFrame' 
+		Run StopOnOverflow vAFrame(oGraphObj);
+	EndIf
+	Set oGraphObj = oGraphObjNext;
+EndLoop
+
+EndFunction
+
+//--------------------------------------------------------------------
+
+Sub StopOnOverflow
+Set vGraphic = vAFrame.FirstGraphicInFrame;
+// Set vGraphic = vTextFrame.FirstGraphicInFrame;
+Loop While(vGraphic)
+	Set vGraphicNext = vGraphic.NextGraphicInFrame;
+	If vGraphic.firstsubcol.overflowed = 1
+		If Displaying = 0
+			Set Displaying = 1;
+		EndIf;
+		Find TextRange(vGraphic.FirstPgf.TextRange.Begin) ScrollTo;
+		Display 'Found an overflowed graphic textbox. Please fix, and re-run.'+charlf+charlf+'In:   '+quote+vGraphic.FirstPgf.text+quote;
+		
+		Update DocObject(activedoc) Redisplay Hyphenating;
+		
+		LeaveScript;
+	EndIf
+	Set vGraphic = vGraphicNext;
+EndLoop
+
+EndSub
+
+//--------------------------------------------------------------------
+
+Sub RenameGraphicText
+
+Set vGraphic = vAFrame.FirstGraphicInFrame;
+// Set vGraphic = vTextFrame.FirstGraphicInFrame;
+Loop While(vGraphic)
+	Set vGraphicNext = vGraphic.NextGraphicInFrame;
+	If (vGraphic.firstpgf.text not '');
+		//-- Paragraph in TextObj:
+		Set vPgf = vGraphic.firstpgf;
+		Loop While(vPgf)
+			Set vPgfNext = vPgf.NextPgfInFlow;
+			Set vPgf.name = 'uniquegraphicparaname_donotmap';
+			Set vPgf = vPgfNext;
+		EndLoop
+	EndIf
+	Set vGraphic = vGraphicNext;
+EndLoop
+
+EndSub
+//--------------------------------------------------------------------
+
+Function DeleteStrings tRange
+//
+Local i(0), tTextList(0), tTextRange(0);
+ 
+Get TextList InRange(tRange) NewVar(tTextList) String;
+Loop While(i > 0) LoopVar(i) Init(tTextList.Count) Incr(-1)
+  New TextRange NewVar(tTextRange) Object(tRange.Begin.Object)
+    Offset(tTextList[i].TextOffset)
+    Offset(tTextList[i].TextOffset + tTextList[i].TextData.Size);
+  Delete Text TextRange(tTextRange);
+EndLoop // -------------------------------------------------------------------
+
+EndFunction
+//----------------------------------
+
+Function CheckForBlankPages oCurrentDoc sPageList
+
+If not oCurrentDoc
+	Set Result = 'NoDoc';
+EndIf
+
+Run eSys.ExtractFileName FullPath(oCurrentDoc.name) newvar(vDocName);
+If not sPageList
+	New StringList NewVar(sPageList);
+EndIf
+
+Set oPage = oCurrentDoc.FirstBodyPageInDoc;
+Loop While(oPage)
+	Set oPageNext = oPage.PageNext;
+
+	//-- Paragraph in page:
+	// check to see if there is only paragraph on the page
+	Set oPagepgf = oPage.pageframe.firstgraphicinframe.firstpgf;
+	Set oPageLastpgf = oPage.pageframe.firstgraphicinframe.lastpgf;
+
+	Loop While(oPagepgf)
+		Set oPagePgfNext = oPagepgf.NextPgfInFlow;
+		Get TextList InObject(oPagepgf) NewVar(vPgfEnd) PgfEnd;
+		Get Member Number(1) From(vPgfEnd) NewVar(vPgfEnd);
+		  // If the paragraph end is at zero, it is empty.				  
+		If vPgfEnd.TextOffset = 0
+			Find Member(oPage.pagenumstring)
+				InList(sPageList)	ReturnStatus(vFoundPage);
+			If not vFoundPage
+				Add Member(oPage.pagenumstring) To(sPageList);
+				Add Member(vDocName) To(sPageList);
+
+			EndIf
+		EndIf
+
+//				display oPagepgf.name+charlf+charlf+oPage.pagenumstring+charlf+vPageNotBlank;
+
+		If (oPagepgf = oPageLastpgf) or (vPageNotBlank = 1)
+			Leaveloop;
+		EndIf
+
+		Set oPagepgf = oPagePgfNext;
+	EndLoop
+	Set oPage = oPageNext;
+
+EndLoop
+
+If sPageList.count > 0
+	Set Result = sPageList;
+Else
+	Set Result = 0;
+EndIf
+
+EndFunction
+
+// -----------------------------------------------
+Function CheckTablesForOverflows oCurrentDoc sLongTables
+
+/*
+How to use:
+	Set oCheckTbl = CheckTablesForOverflows{oDoc,sBadTableStringList}; // check all tables
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local oDoc(NULL), oTableAnchorPagePGF(0), oTableCaptionPGF(0), oTable(0);
+
+If not oCurrentDoc
+	Set Result = 'NoDoc';
+EndIf
+
+Run eSys.ExtractFileName FullPath(oCurrentDoc.name) newvar(vDocName);
+If not sLongTables
+	New StringList NewVar(sLongTables);
+EndIf
+New String NewVar(vNonBreak) IntValue(17);
+New String NewVar(vTabChar) IntValue(8);
+
+	//-- Table in Doc:
+	Set oTable = oCurrentDoc.FirstTblInDoc;
+	Loop While(oTable)
+		Set oTableNext = oTable.NextTblInDoc;
+		If (oTable.Page.ObjectName = 'BodyPage')
+
+			Set oTableAnchorPage = oTable.pgf.intextframe.page;
+			If (oTable.firstpgf)
+				Set oTableCaptionPage = oTable.firstpgf.page;
+			Else 
+				Set oTableCaptionPage = oTable.firstrowinTbl.firstcellinrow.firstpgf.page;
+			EndIf
+			
+			
+			If oTableAnchorPage not= oTableCaptionPage
+				// remove/replace all non-breaking spaces and tabs
+				Set vTableNumber = eStr.ReplaceAll{oTable.firstpgf.pgfnumber, vNonBreak, ' '};
+				Set vTableNumber = eStr.ReplaceAll{vTableNumber, vTabChar, ''};
+
+//				Add Member(oTable.firstpgf.pgfnumber) To(sLongTables);
+				Add Member(vTableNumber) To(sLongTables);				
+				Add Member(vDocName) To(sLongTables);
+
+				If sBadTableCaptions
+					Set sBadTableCaptions = sBadTableCaptions+charlf+oTable.firstpgf.text;
+				Else
+					Set sBadTableCaptions = oTable.firstpgf.text;
+				EndIf
+			EndIf		
+		EndIf
+		Set oTable = oTableNext;
+	EndLoop
+
+	If sLongTables.count > 0
+		Set Result = sLongTables;
+	Else
+		Set Result = 0;
+	EndIf
+	
+// EndIf	
+
+EndFunction
+
+//--------------------------------------------------------------------
+Function CheckBookForGenFiles //oBookUnderTest
+
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local oBookCompList(NULL), vTestBookComp(NULL), vTestBookCompNext(NULL), vBookTOC(0),vBookLOF(0),vBookLOT(0)
+
+Set oBookUnderTest = activebook;
+
+//-- BookComponent in Book:
+Set vTestBookComp = oBookUnderTest.FirstComponentInBook;
+Loop While(vTestBookComp)
+
+
+/* Use this for Book component testing
+	Run eSys.ExtractFileName FullPath(vTestBookComp.name) NewVar(vTBCompName);
+	display vTBCompName+charlf+
+	'Gen? '+vTestBookComp.BookComponentIsGeneratable+charlf+
+	'Type? '+vTestBookComp.bookcomponenttype;
+*/
+	Set vTestBookCompNext = vTestBookComp.NextComponentInBook;
+	If vTestBookComp.BookComponentIsGeneratable = 1
+		If vTestBookComp.bookcomponenttype = 0 //TOC
+			Set vBookTOC = vBookTOC + 1;
+		EndIf
+
+		If vTestBookComp.bookcomponenttype = 1 //LOF
+			Set vBookLOF = vBookLOF + 1;
+		EndIf
+				
+		If vTestBookComp.bookcomponenttype = 2 //LOT
+			Set vBookLOT = vBookLOT + 1;
+		EndIf
+
+	EndIf		
+	Set vTestBookComp = vTestBookCompNext;
+EndLoop
+
+/* final output: 	0 = no gen files
+			1 = missing TOC and LOF
+			2 = missing TOC and LOT
+			3 = missing TOC
+			4 = missing LOF and LOT
+			5 = missing LOT
+			6 = missing LOF
+			7 = OK
+*/
+
+If vBookTOC = 0
+	If vBookLOT = 0 and vBookLOF = 0
+		Set Result = 'No Generated Files';
+	EndIf
+	If vBookLOT = 0 and vBookLOF > 0
+		Set Result = 'Missing TOC and LOT (or book not set up to generate it)';
+	EndIf
+	If vBookLOT > 0 and vBookLOF = 0
+		Set Result = 'Missing TOC and LOF (or book not set up to generate it)';
+	EndIf		
+	If vBookLOT > 0 and vBookLOF > 0
+		Set Result = 'Missing TOC (or book not set up to generate it)';
+	EndIf
+Else
+	If vBookLOT = 0 and vBookLOF = 0
+		Set Result = 'No Generated LOT and LOF';
+	EndIf
+	If vBookLOT = 0 and vBookLOF > 0
+		Set Result = 'Missing LOT (or book not set up to generate it)';
+	EndIf
+	If vBookLOT > 0 and vBookLOF = 0
+		Set Result = 'Missing LOF (or book not set up to generate it)';
+	EndIf		
+	If vBookLOT > 0 and vBookLOF > 0
+		Set Result = 'OK';
+	EndIf
+EndIf
+
+// Test: display vBookTOC+charlf+vBookLOF+charlf+vBookLOT+charlf+charlf+quote+result+quote;
+
+//	Set vFinalMessage = 'No TOC.';
+
+//Set Result = vBookTOC + vBookLOT + vBookLOF;
+
+EndFunction
+//--------------------------------------------------------------------
+Function ProcessBook Using oBook sSub bSaveDocs vSendingScript
+/*
+ProcessBook Version 1.2 April 12, 2004
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set iResult = ProcessBook{ActiveBook,'ProcessDoc',1};
+
+Requires IsDocOpen and ParseFilePath functions.
+
+ProcessBook takes a book object (oBook) and a subroutine name (sSub). 
+It opens each component in the book and runs the subroutine name on that 
+document. The bSaveDocs parameter determines if each component is saved 
+after it is processed. Some subroutines simply collect information
+from book components, so it is not necessary to save the documents after 
+they are processed. Use 1 to save the documents, 0 to not save them.
+Note that book components that are already open in the current FrameMaker
+Session are never saved by this function.
+
+The function returns 0 if all of the components were opened and processed.
+If the function is non-zero number, it represents the number of components
+that were not processed. The names of the skipped components are written
+to the Console window.
+*/
+If vSendingScript
+	New ScriptVar NewVar(scriptSendingScript) File(vSendingScript);
+Endif
+// Initialize the Result variable and counters.
+Local Result(0) iTotalComponents(0) iDocsProcessed(0);
+// See if the book is a valid object.
+If oBook.ObjectName not= 'Book'
+  Set Result = 'The first parameter is not a valid Book object.';
+  LeaveSub;
+EndIf
+// Initialize variables for the book components and document object.
+Local oBookComp(0) oDoc(0) bDocIsOpen(0);
+// Loop through all of the files in the book.
+Loop ForEach(BookComponent) In(oBook) LoopVar(oBookComp)
+  Set iTotalComponents = iTotalComponents + 1; // Total components in book.
+  // Run a function to see of the document is already opened.
+  Set oDoc = IsDocOpen{oBookComp.Name};
+  If oDoc.ObjectName = 'Doc'
+    Set bDocIsOpen = 1; // Indicates that the document is already open.
+  Else
+    Set bDocIsOpen = 0; // Indicates that the document was not already open.
+    Set oDoc = 0; // Reset the document variable
+    Set ErrorCode = 0;
+    // Attempt to open the book component.
+    Open Document File(oBookComp.Name) NewVar(oDoc)
+      UpdateTextReferences(No) UpdateXRefs(No) 
+      RefFileNotFound(AllowAllRefFilesUnFindable)
+      FontNotFoundInDoc(OK) FileIsOldVersion(OK)
+      MakeVisible(False) AlertUserAboutFailure(False);
+    // If the document can't be opened, write a message to the Console.
+    If ErrorCode not= 0
+      Write Console 'The document '+oBookComp.Name+' could not be opened.';
+    EndIf
+  EndIf
+  If oDoc not= 0
+    // Write the document's name to the book's status line.
+    Set oBook.StatusLine = 'Processing '+ParseFilePath{oDoc.Name,'FileExt'};
+    // If the document is open, run the ProcessDoc subroutine.
+	If vSendingScript
+		Run scriptSendingScript.sSub oDoc(oDoc);
+	Else
+		Run sSub oDoc(oDoc);	
+	EndIf
+    Set iDocsProcessed = iDocsProcessed + 1;
+    // See if the document was previously open; if so, leave it open 
+    // and unsaved.
+    If bDocIsOpen = 0
+      If bSaveDocs = 1 // Test the bSaveDocs parameter.
+        Save Document DocObject(oDoc);
+      EndIf
+      Close Document DocObject(oDoc) IgnoreMods;
+    EndIf
+  EndIf
+EndLoop
+// Restore the book status line.
+Set oBook.StatusLine = '';
+// Result of 0 means all book components were processed.
+// A non-zero number is the count of book components not processed.
+Set Result = iTotalComponents - iDocsProcessed;
+//
+EndFunc
+
+//--------------------------------------------------------------------
+Function IsDocOpen Using sFileName
+/*
+IsDocOpen Version 1.0 December 26, 2003
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vDoc = IsDocOpen{'C:\Templates\MainTemplate.fm'};
+
+IsDocOpen takes a complete file path and sees if the FrameMaker document
+represented by the path is currently open in FrameMaker. It returns
+the document or book object if it is open, or NULL if it is not.
+
+You should test the ObjectName of the returned Result to see if it is
+a Doc object or Book object.
+*/
+
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local oDoc(NULL);
+
+// Loop through the list of open documents.
+Loop ForEach(Doc) In(Session) LoopVar(oDoc)
+  // See if the document name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the document object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+
+// Loop through the list of open books.
+Loop ForEach(Book) In(Session) LoopVar(oDoc)
+  // See if the book name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the book object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+//
+EndFunc 
+//--------------------------------------------------------------------
+
+Function OpenADoc Using oTheDoc sSub bSaveDocs bLeaveOpen bMakeVisible
+
+/*
+OpenADoc Version 1.0 October 20, 2007 (based on the ProcessBook function)
+By Rick Rettinhouse
+
+Set oResult = OpenADoc{'C:\Document_Template\sample.fm',subroutinename,1,0};
+
+Parameters: 1. Document to open
+			2. Subroutine to run after opening --> 	Use 'None' to not run a subroutine
+													and leave document open
+ 			3. Don't save the document -->			1 = Save, 0 = Don't save
+ 			4. Leave the Document open -->			1 = Leave Open, 0 = Close document
+			5. Make the document visible -->		1 = visible, 0 = invisible
+
+Requires IsDocOpen functions.
+
+OpenADoc takes a document object (oTheDoc) and a subroutine name (sSub). 
+It opens the document and runs the subroutine name on that 
+document. The bSaveDocs parameter determines if each component is saved 
+after it is processed. Some subroutines simply collect information
+from book components, so it is not necessary to save the documents after 
+they are processed.
+
+The function returns the document object. Errors will be written to the console.
+*/
+
+Set Result = NULL;
+Set oTemporaryDoc = IsDocOpen{oTheDoc};
+
+/*
+If (bLeaveOpen = 1) or (sSub = 'None')
+	Set vMakeVisible = 1;
+Else
+	Set vMakeVisible = 0;
+EndIf
+*/
+If oTemporaryDoc.ObjectName = 'Doc'
+	Set bDocIsOpen = 1; // Indicates that the document is already open.
+Else
+    Set bDocIsOpen = 0; // Indicates that the document was not already open.
+    Set oTemporaryDoc = 0; // Reset the document variable
+    Set ErrorCode = 0;
+    // Attempt to open the book component.
+    Open Document File(oTheDoc) NewVar(oTemporaryDoc)
+      UpdateTextReferences(No) UpdateXRefs(No)
+      FileIsInUse(ResetLockAndContinue)
+      RefFileNotFound(AllowAllRefFilesUnFindable)
+      FontNotFoundInDoc(OK) FileIsOldVersion(OK)
+      MakeVisible(bMakeVisible) AlertUserAboutFailure(False);
+    // If the document can't be opened, write a message to the Console.
+    If ErrorCode not= 0
+      Write Console 'The document '+oBookComp.Name+' could not be opened.';
+      LeaveSub;
+    EndIf
+EndIf
+If sSub not ='None'
+	Run sSub oOpenedDoc(oTemporaryDoc);
+Else
+	Set Result = oTemporaryDoc;
+	LeaveSub;
+EndIf
+
+If (bDocIsOpen = 0) and (bLeaveOpen not = 1)
+	If bSaveDocs = 1 // Test the bSaveDocs parameter.
+		Save Document DocObject(oTemporaryDoc);
+	EndIf
+	Close Document DocObject(oTemporaryDoc) IgnoreMods;
+EndIf
+Set Result = oTemporaryDoc;
+
+EndFunc
+//--------------------------------------------------------------------
+
+Function ParseFilePath Using sPath sReturnType
+/*
+ParseFilePath Version 1.1 January 7, 2004
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vPath = ParseFilePath{'C:\Scripts\CSA\Test.fsl','Path'};
+
+ParseFilePath takes a path name and parses it into component parts.
+sPath is a path and file name. sReturnType is a string that specifies 
+which part of the path is returned from the function.
+
+'Path' returns the path, including the last directory separator.
+'File' returns the file name without the path or extension.
+'Ext' returns the extension or a NULL string if there is no extension.
+'PathFile' returns the path and file without the file extension.
+'FileExt' returns the file name and extension without the path.
+
+You should initialize the ErrorCode variable before calling the function.
+If the color is created successfully, ErrorCode will be 0 after the
+function completes. Otherwise, ErrorCode will be a non-zero number.
+*/
+Local Result(NULL); // Initialize the Result variable.
+Set ErrorCode = 0; // Initialize the ErrorCode variable.
+
+// See if either of the parameters are missing.
+If (Args[1] = NULL) or (Args[2] = NULL)
+  Set ErrorCode = -2407; // Set the ErrorCode to Missing Parameter.
+  LeaveSub;
+EndIf
+
+// Test the sReturnType parameter.
+If eStr.Equal{sReturnType,'Path','NoCase'}
+  Run eSys.ExtractPathName FileName(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'File','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+  Run eSys.RemoveFileExtension FullPath(Result) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'FileExt','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'PathFile','NoCase'}
+  Run eSys.RemoveFileExtension FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'Ext','NoCase'}
+  Run eSys.ExtractFileExtension FullPath(sPath) NewVar(Result);
+Else
+  Set ErrorCode = -43; // Set the ErrorCode to Bad Parameter.
+EndIf
+//
+EndFunc
+
+//--------------------------------------------------------------------
+//!REVHIST=[01-04-2012] Added InitializeXObject function
+//!REVHIST=[01-04-2012] Added RemoveVarFormatting function
+//!REVHIST=[02-03-2012] Fixed "OpenBook" routine so it can call other scripts
+//!REVHIST=[02-03-2012] Added DeleteStrings function
+//!REVHIST=[09-03-2012] Added CANCEL button to some preflight routines so you can stop and fix things manually if you wish.
+//!REVHIST=[09-11-2012] Added Author's Notes preflight to "preflight check" whether the condition settings are inadvertantly set to ShowAll or if the conditional indicators are showing.
+//!REVHIST=[12-01-2012] Added a preflight check to ensure generated files (TOC,LOT,LOF) are used.
+//!REVHIST=[12-07-2012] Fixed bug where the "ShowAll" property wasn't being changed after GUI prompt.
+//!REVHIST=[12-07-2012] Fixed bug where the generated file checker was returning a false result.
+//!REVHIST=[01-11-2013] Changed TOC/LOT/LOF checker to let the book have 1 or more of these generated files (instead of just 1 of each).
+
+

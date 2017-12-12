@@ -1,0 +1,53 @@
+Function CompareConditions oSourceDoc, oSubDoc
+/*
+Description:
+Send this function the document objects, and it will detect if 2nd document has extra conditions not in 1st document.
+
+Purpose: 
+The intended use of this script is to determine if the Author's Notes file is accurate.
+
+Usage:
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('Book_Evaluation_Functions.fsl') NewVar(vscript_BookEvalFunctions);	
+New ScriptVar NewVar(vBookEvalFunctions) File(vscript_BookEvalFunctions);
+
+Set vFigureTypeName = vBookEvalFunctions.CompareConditions{oSourceDoc,oSubDoc};
+
+
+
+Notes: This script should
+		- Read Condition Names of Doc #1 (source) and Doc #2 (subordinant)
+		- Read Condition Definition  of Doc #1 and Doc #2 (maybe make this an option depending on time-to-run)
+		- Compare
+		- Send message back messages if there are inconsistencies:
+			- Extra Conditions in Doc #2
+			- Colors not consistent
+			- Definition not the same
+
+*/
+// Initialize the Result variable.
+Set Result = NULL;
+Local sSourceDocCond(NULL), vSubDocCondFmt(NULL), vCondOBJ(NULL)
+New StringList NewVar(sSourceDocCond);
+
+//-- Condition Format:
+Set vSubDocCondFmt = oSubDoc.FirstCondFmtInDoc;
+Loop While(vSubDocCondFmt)
+	Set vSubDocCondFmtNext = vSubDocCondFmt.NextCondFmtInDoc;
+	Get Object Type(CondFmt) Name(vSubDocCondFmt.name) NewVar(vCondOBJ) DocObject(oSourceDoc);
+
+	If (not vCondOBJ)
+		Add Member(vSubDocCondFmt.name) To(sSourceDocCond);
+	EndIf
+	
+	Set vSubDocCondFmt = vSubDocCondFmtNext;
+EndLoop
+
+Set Result = sSourceDocCond; // can I send back a stringlist?? If not, convert to one big text line I guess.
+
+EndFunc;
+/*
+Other possibilities
+- Compare year on date to copyright date
+- Detect Changebars in updated document (maybe check it during print cycle, or maybe better during doc. update?)
+
