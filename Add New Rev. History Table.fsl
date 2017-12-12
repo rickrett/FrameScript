@@ -1,0 +1,99 @@
+
+Set oDoc = ActiveDoc;
+If (not oDoc) LeaveSub; EndIf
+
+// Initialization
+
+If not vTemplatePath
+	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
+EndIf
+
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+New ScriptVar NewVar(oScript_GenFunctions) File(vscript_GenFunctions);
+Set oDoc.Showall = 1; // show all conditions
+Set oDoc.ShowCondIndicators = 1;
+// Set vFMAnchorParaScanName = oScript_GenFunctions.ScanMasterTable{'P','Frame:Anchor'};
+
+Set vRevHistExamplePath = vTemplatePath+dirsep+'Rev_History_Example.fm';
+Set oRevHistExampleDoc = oScript_GenFunctions.OpenADoc{vRevHistExamplePath,'None',0,1,0}; // leave open, don't save, make visible (you must close it manually later)
+
+//-- Table/Row/Cell/Pgf:
+Set vGotit = 0;
+
+Set oRevHistExampleFlow = oRevHistExampleDoc.MainFlowInDoc;
+// Find the first paragraph in the flow.
+Set oRevHistExamplePgf = oRevHistExampleFlow.FirstPgfInFlow;
+// Loop through the paragraphs.
+Loop While(oRevHistExamplePgf)
+	// Now test for tables in the paragraph.
+	Get TextList InObject(oRevHistExamplePgf) NewVar(vRevHistExampleTlist) TblAnchor;
+	// If there are one or more tables, this loop will be entered.
+	Loop While (x <= vRevHistExampleTlist.Count) LoopVar(x) Init(1) Incr(1)
+		Get Member Number(x) From(vRevHistExampleTlist) NewVar(vRevHistExampleTblAnchor);
+
+// iAnchorOffset doesn't exist figure out how to get the anchor only.
+
+//		display vRevHistExampleTblAnchor[2]; // offset
+		Set TextSelection = oRevHistExamplePgf.textrange;
+		Set vGotit = 1;
+//		New TextRange NewVar(oAnchTR)
+//		  Object(oRevHistExamplePgf) Offset(iAnchorOffset) Offset(iAnchorOffset+1);
+		Set oRevHistExampleDoc.TextSelection = oRevHistExamplePgf.textrange; //oAnchTR;
+
+		PushClipboard;
+
+		Copy Text DocObject(oRevHistExampleDoc);
+//			Cut Text DocObject(oRevHistExampleDoc);
+		LeaveLoop;
+	EndLoop
+	If vGotit = 1
+		leaveloop;
+	EndIf
+	Set oRevHistExamplePgf = oRevHistExamplePgf.NextPgfInFlow;
+EndLoop
+
+Close Doc DocObject(oRevHistExampleDoc) IgnoreMods;
+
+
+//-- Paragraph in MainFlow:
+Set oPgf = oDoc.FirstPgfInMainFlow;
+Loop While(oPgf)
+	Set oPgfNext = oPgf.NextPgfInFlow;
+		If oPgf.Text = 'Revision History'
+
+	New Pgf PrevObject(oPgf)
+		DocObject(oDoc) NewVar(oRevTablePgf);
+//		PgfFmtName(vFMAnchorParaScanName) //PgfFmtName('Frame:Anchor');
+	New TextLoc NewVar(vTextLoc) Object(oRevTablePgf)
+		Offset(ObjEndOffset-1);
+
+	// Paste the captured text
+//	New Text TextLoc(vTextLoc) vRevHistExampleTblAnchor;
+	Set textselection = oRevTablePgf.textrange;
+	Paste Text DocObject(oDoc);
+	PopClipboard;	
+//			Leavescript;
+			Leavesub;
+		EndIf
+	Set oPgf = oPgfNext;
+EndLoop
+
+
+
+Sub PlugInRevHistTable
+
+	New Pgf PrevObject(oPgf)
+		DocObject(oDoc) NewVar(oRevTablePgf)
+		PgfFmtName(vFMAnchorParaScanName) //PgfFmtName('Frame:Anchor');
+	New TextLoc NewVar(vTextLoc) Object(oRevTablePgf)
+		Offset(ObjEndOffset-1);
+
+	// Paste the captured text
+//	New Text TextLoc(vTextLoc) vRevHistExampleTblAnchor;
+	Set textselection = oRevTablePgf.textrange;
+	Paste Text DocObject(oDoc);
+
+
+EndSub
+//!REVHIST=[01-29-2015] Added code to push current content in copy buffer to stack, and after new rev. history entry paste, to POP the stack back to the copy buffer.

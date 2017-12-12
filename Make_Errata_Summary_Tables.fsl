@@ -1,0 +1,342 @@
+
+Set oDoc = ActiveDoc;
+	
+If (not oDoc) LeaveSub; EndIf
+
+New StringList NewVar (sItem);
+New StringList NewVar (sSummaryTables);
+
+//-- Create Commands:
+
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+
+Set vDeletedCondScanName = vBatchScript.ScanMasterTable{'CO','_Deleted'};
+Set vParanumXREFScanName = vBatchScript.ScanMasterTable{'X','<paranum> (only)'};
+Set vPageXREFScanName = vBatchScript.ScanMasterTable{'X','Page (only)'};
+Set vTextXREFScanName = vBatchScript.ScanMasterTable{'X','Text (only)'};
+Set vH1ParaScanName = vBatchScript.ScanMasterTable{'P','Heading:L1'};
+Set vSEStatusparaScanName = vBatchScript.ScanMasterTable{'P','SpecUpdate:Erratum:d_Status'};
+Set vSE1ParaScanName = vBatchScript.ScanMasterTable{'P','SpecUpdate:Erratum:1'};
+Set vSEnParaScanName = vBatchScript.ScanMasterTable{'P','SpecUpdate:Erratum:n+'};
+Set vSI1ParaScanName = vBatchScript.ScanMasterTable{'P','SpecUpdate:Item:1'};
+Set vSInParaScanName = vBatchScript.ScanMasterTable{'P','SpecUpdate:Item:n+'};
+
+Get Object Type(CondFmt) Name(vDeletedCondScanName) //Name('_Deleted')
+	NewVar(oDelCondition) DocObject(oDoc);
+If (not oDelCondition) 
+	Display 'The _Deleted condition does not exist. You will need to delete the old summary table rows without the benefit of conditionalized rows.';
+EndIf
+New Integer NewVar(iDelCondInt) IntValue(oDelCondition);
+New IntList NewVar(iCondList) Value(iDelCondInt);
+
+Run GetTables;
+
+//-- Paragraph in Flow:
+Set vFlow = oDoc.MainFlowInDoc;
+Set vPgf = vFlow.FirstPgfInFlow;
+Loop While(vPgf)
+	Set vPgfNext = vPgf.NextPgfInFlow;
+	If (vPgf.Name = vH1ParaScanName) //'Heading:L1')
+		Set vItemType = vPgf.text;
+
+	EndIf
+	If 	(vPgf.Name = vSEnParaScanName) or (vPgf.Name = vSE1ParaScanName) or
+		(vPgf.Name = vSInParaScanName) or (vPgf.Name = vSI1ParaScanName)
+		Set vNewMarker = SetMarker{vPgf};
+		If not vItemType
+			Display 'A Heading:L1 paragraph for each of the following types must be included:'+charlf+
+					'- Errata'+charlf+'- Specification Changes (if included)'+charlf+'- Specification Clarifications (if included)';
+			LeaveScript;
+		EndIf
+		Add Member(vItemType) To (sItem); 						// heading		(i)
+		Add Member(vPgf.Text) To (sItem); 						// item # and item heading (i+1)
+		Add Member(vNewMarker.markertext) To (sItem); 			// markertext for XREF (i+2)
+		New TextLoc NewVar(vTLoc) Object(vPgf) offset(vPgf.begin.offset+1);
+		If vTLoc.incond;
+			New Integer NewVar(iParaCondInt) IntValue(vTLoc.incond);
+			Add Member(iParaCondInt) To (sItem);				// heading (i+3)
+		Else													// or
+			Add Member('None') To (sItem);						// heading (i+3)
+		EndIf
+		Set vStatusPgf = vPgf.NextPgfInFlow;
+		Loop While(vStatusPgf)
+			Set vStatusPgfNext = vStatusPgf.NextPgfInFlow;
+			If (vStatusPgf.Name = vSEStatusparaScanName) //'SpecUpdate:Erratum:d_Status')
+				Set vNewMarker = SetMarker{vStatusPgf};
+				Add Member(vStatusPgf.Text) To (sItem);			// item # and item heading (i+4)
+				Add Member(vNewMarker.markertext) To (sItem); 	// markertext for XREF (i+5)
+				LeaveLoop;
+			EndIf
+			If	(vStatusPgf.Name = vSEnParaScanName) or (vStatusPgf.Name = vSE1ParaScanName) or
+				(vStatusPgf.Name = vSInParaScanName) or (vStatusPgf.Name = vSI1ParaScanName)
+				Set vNewMarker = SetMarker{vStatusPgf};
+				Add Member(0) To (sItem);
+				Add Member(0) To (sItem);
+				LeaveLoop;
+			EndIf
+//			Display 'I think things are out of order or are missing. I can not find a status here:';
+//			Find TextRange(vStatusPgf.textrange) ScrollTo;
+//			LeaveScript;
+			Set vStatusPgf = vStatusPgfNext;
+		EndLoop
+	EndIf
+    Set vPgf = vPgfNext;
+EndLoop
+
+Loop While(i <= sItem.Count) LoopVar(i) InitVal(1) Incr(6)
+	Find String('errata') InString(sItem[i]) nocase ReturnStatus(vErrataFound);
+	If vErrataFound
+		Set vSummaryTableRow = oErrataTbl.LastRowInTbl;
+		New TableRows TableObject(oErrataTbl) RowObject(vSummaryTableRow)
+		  Direction(below) BodyRows(1);
+		Set vSummaryTableRow = vSummaryTableRow.NextRowInTbl;
+		// Errata # (column 1)
+		Set vSummaryTableCell = vSummaryTableRow.FirstCellInRow;
+		New XRef Format(vParanumXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('<paranum> (only)')
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+
+		// Empty Column (column 2)
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;
+
+		// Page number of Errata (column 3)	
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;
+		New XRef Format(vPageXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('Page (only)') 
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+
+		// Status of Errata (column 4)
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;
+		New XRef Format(vTextXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('Text (only)')
+		  XRefSrcText(sItem[i+5]) XRefFile(oDoc.name);
+
+		// Errata Description (column 5)
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;		  
+		New XRef Format('Text (only)') NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf)
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+	EndIf
+
+	Find String('change') InString(sItem[i]) nocase ReturnStatus(vChangeFound);
+	If vChangeFound
+		Set vSummaryTableRow = oChangesTbl.LastRowInTbl;
+		New TableRows TableObject(oChangesTbl) RowObject(vSummaryTableRow)
+		  Direction(below) BodyRows(1);
+		Set vSummaryTableRow = vSummaryTableRow.NextRowInTbl;
+
+		// Change # (column 1)
+		Set vSummaryTableCell = vSummaryTableRow.firstcellinrow;
+		New XRef Format(vParanumXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('<paranum> (only)')
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+
+		// Empty Column (column 2)
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;
+
+		// Page number of Change (column 3)	
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;
+		New XRef Format(vPageXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('Page (only)')
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+
+		// Change Description (column 5)
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;		  
+		New XRef Format(vTextXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) //Format('Text (only)')
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+	EndIf
+
+	Find String('clarification') InString(sItem[i]) nocase ReturnStatus(vClarificationFound);
+	If vClarificationFound
+		Set vSummaryTableRow = oClarificationsTbl.LastRowInTbl;
+		New TableRows TableObject(oClarificationsTbl) RowObject(vSummaryTableRow)
+		  Direction(below) BodyRows(1);
+		Set vSummaryTableRow = vSummaryTableRow.NextRowInTbl;		
+		// clarification # (column 1)
+		Set vSummaryTableCell = vSummaryTableRow.firstcellinrow;
+		New XRef Format(vParanumXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('<paranum> (only)')
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+
+		// Empty Column (column 2)
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;
+
+		// Page number of clarification (column 3)	
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;
+		New XRef Format(vPageXREFScanName)NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('Page (only)') 
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+
+		// clarification Description (column 5)
+		Set vSummaryTableCell = vSummaryTableCell.NextCellInRow;		  
+		New XRef Format(vTextXREFScanName) NewVar(vXRef1) TextLoc(vSummaryTableCell.FirstPgf) // Format('Text (only)')
+		  XRefSrcText(sItem[i+2]) XRefFile(oDoc.name);
+	EndIf
+
+	// Conditionalize the row if it needs it
+	If sItem[i+3] not 'None'
+		New IntList NewVar(iCondList) Value(sItem[i+3]);	
+		Set vSummaryTableRow.InCond = iCondList;
+	EndIf
+EndLoop
+
+
+
+//-- Table/Row/Cell/Pgf:
+Set oTbl = oDoc.FirstTblInDoc;
+Loop While(oTbl)
+	Set vDoNotConditionFlag = 0;
+	If (oTbl = oErrataTbl) or  (oTbl = oChangesTbl) or  (oTbl = oClarificationsTbl)
+		Set oRow = oTbl.FirstRowInTbl;
+		Loop While(oRow)
+			If (oRow.RowType = RowBody) // RowBody RowHeading RowFooting
+				New Integer NewVar(iBodyRowCondInt) IntValue(oRow.InCond);
+				If (oRow.InCond not = iDelCondInt)
+					Set vDoNotConditionFlag = 1;
+					LeaveLoop;
+				EndIf
+			EndIf //-- RowBody
+			Set oRow = oRow.NextRowInTbl;
+		EndLoop //-- Row
+	
+		If vDoNotConditionFlag = 0
+			// Apply the _Deleted condition format to the summary table caption
+			Apply TextProperties CondFmt(vDeletedCondScanName) TextRange(oTbl.FirstPgf.TextRange);// CondFmt('_Deleted')
+			
+			// Apply the _Deleted condition format to the summary table table marker
+			Apply TextProperties CondFmt(vDeletedCondScanName) TextRange(oTbl.Pgf.TextRange); // CondFmt('_Deleted')
+		Else
+			// Apply the _Deleted condition format to the summary table caption
+			Apply TextProperties CondFmt('') TextRange(oTbl.FirstPgf.TextRange);
+			
+			// Apply the _Deleted condition format to the summary table table marker
+			Apply TextProperties CondFmt('') TextRange(oTbl.Pgf.TextRange);	
+		EndIf
+	EndIf //-- BodyPage
+	
+	Set oTbl = oTbl.NextTblInDoc;
+EndLoop //-- Table
+
+
+
+
+Update DocObject(oDoc) XRefs Everything;
+Display 'Done!';
+LeaveScript;
+
+// ---------------------------------------------
+Sub GetTables
+//-- Table in Doc:
+Set oTbl = oDoc.FirstTblInDoc;
+Loop While(oTbl)
+	Set oTblNext = oTbl.NextTblInDoc;
+	If (oTbl.Page.ObjectName = 'BodyPage')
+		Find String('errata') InString(oTbl.firstpgf.text) nocase ReturnStatus(vFoundErrataTable);
+		If vFoundErrataTable and not oErrataTbl
+			Set oErrataTbl = oTbl;
+		EndIf
+		Find String('specification changes') InString(oTbl.firstpgf.text) nocase ReturnStatus(vFoundChangesTable);
+		If vFoundChangesTable and not oChangesTbl
+			Set oChangesTbl = oTbl;
+		EndIf
+		Find String('specification clarifications') InString(oTbl.firstpgf.text) nocase ReturnStatus(vFoundClarificationsTable);
+		If vFoundClarificationsTable and not oClarificationsTbl
+			Set oClarificationsTbl = oTbl;
+		EndIf 
+	EndIf
+	Set oTbl = oTblNext;
+EndLoop
+If not oErrataTbl or not oChangesTbl or not oClarificationsTbl
+	Display 'The Summary tables must be correctly titled:'+charlf+
+			'- Errata'+charlf+'- Specification Changes'+charlf+'- Specification Clarifications'+charlf+charlf+
+			'Please fix the issue and re-run the script.';
+	LeaveScript;
+EndIf
+
+// Set all existing cells to _deleted condition
+/*
+oErrataTbl
+oChangesTbl
+oClarificationsTbl
+*/
+
+
+
+
+Set vSumRow = oErrataTbl.FirstRowInTbl;
+Loop While(vSumRow)
+	If (vSumRow.RowType = RowBody)
+		Set vSumRow.InCond = iCondList;
+	EndIf
+	Set vSumRow = vSumRow.NextRowInTbl;
+EndLoop //-- vSumRow
+
+Set vSumRow = oChangesTbl.FirstRowInTbl;
+Loop While(vSumRow)
+	If (vSumRow.RowType = RowBody)
+		Set vSumRow.InCond = iCondList;
+	EndIf
+	Set vSumRow = vSumRow.NextRowInTbl;
+EndLoop //-- vSumRow
+
+Set vSumRow = oClarificationsTbl.FirstRowInTbl;
+Loop While(vSumRow)
+	If (vSumRow.RowType = RowBody)
+		Set vSumRow.InCond = iCondList;
+	EndIf
+	Set vSumRow = vSumRow.NextRowInTbl;
+EndLoop //-- vSumRow
+	
+EndSub
+
+
+
+// -----------------------
+Function SetMarker vMarkerPgf
+/* 	-------------------
+ 	Setting the Markers
+ 	
+ 	This function will check if a marker exists, and if it does not, it will place a new one.
+ 	It will return the marker object (whether it found one or made a new one).
+ 	
+ 	Usage: Set vNewMarker = SetMarker{currentpgf};
+ 	
+ 	-------------------
+*/
+Local 	vMarkerFound(0), vTList(0), vTItem(0), vTL(0)
+		vMarkerString(0), vMarkerFound(0) vMarkerNumber(0);
+
+Set vMarkerString = vMarkerPgf.text;
+
+// Check to see if the marker exists
+Get TextList InObject(vMarkerPgf) NewVar(vTList) MarkerAnchor;
+Loop While(i <= vTList.Count) LoopVar(i) Init(1) Incr(1)
+	Get Member Number(i) From(vTList) NewVar(vTItem);
+	Set vMarker = vTItem.TextData;
+	If (vMarker.MarkerTypeId.InvariantName = 'Cross-Ref')
+		Set Result = vMarker;
+		LeaveSub;
+	EndIf
+EndLoop
+
+// Set the text location to indent by one (if the para is big enough)
+If vMarkerPgf.text.size > 0
+	New TextLoc NewVar(vTL) Object(vMarkerPgf) offset(vMarkerPgf.begin.offset +1);
+Else
+	Set vTL = vMarkerPgf;
+EndIf
+
+// Set vTL = vMarkerPgf; // this places the marker position at the front of the para. Above code places it one character in.
+// create the marker text and place the marker
+New String NewVar(vMarkerNumber) Value(vMarkerPgf.Unique);
+Set vMarkerString = vMarkerNumber + ': ' + vMarkerPgf.Name + ': '+ vMarkerString;
+New Marker NewVar(vMarker) MarkerName('Cross-Ref')
+TextLoc(vTL) Markertext(vMarkerString);
+
+Set Result = vMarker; // vMarkerString;
+
+// --- End of Setting the Markers ---
+
+EndFunction
+// -------------------------------
+
+/* rev. hist.
+
+1.0 Initial release
+1.1 Now conditionalizes the summary table captions and table markers as '_deleted' if there are no items (like no spec. changes or clarifications).
+	It will unconditionalize these items if the script is later run and it finds those items.
+*/

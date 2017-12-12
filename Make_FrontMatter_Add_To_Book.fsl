@@ -1,0 +1,723 @@
+
+If displaying = 1
+	Set Displaying = 0;
+EndIf 
+
+Set vOpenVisibly = 0; // not visible = 0, visible = 1
+If ActiveBook
+
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+	
+New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+Set vFMAnchorParaScanName = vBatchScript.ScanMasterTable{'P','Frame:Anchor'};
+Set vHead1NoNumParaScanName = vBatchScript.ScanMasterTable{'P','Heading:NoNum:L1'};
+Set vHead2NoNumParaScanName = vBatchScript.ScanMasterTable{'P','Heading:NoNum:L2'};
+Set vTblCellLeftParaScanName = vBatchScript.ScanMasterTable{'P','Table:Cell:Left'};
+Set vRevHistTableScanName = vBatchScript.ScanMasterTable{'T','Table:RevHistory'};
+Set vDSCoverMPScanName = vBatchScript.ScanMasterTable{'MP','CoverPage:Datasheet'};
+Set vAppCoverMPScanName = vBatchScript.ScanMasterTable{'MP','CoverPage'};
+Set vLegalMPScanName = vBatchScript.ScanMasterTable{'MP','LegalDisclaimerPage'};
+Set vDocNumVarScanName = vBatchScript.ScanMasterTable{'V','Doc:Num'};
+Set vDocRevVarScanName = vBatchScript.ScanMasterTable{'V','Doc:Revision:Num'};
+
+
+
+	Set oBook = ActiveBook;
+	//-- BookComponent in Book:
+	Set oBookComp = oBook.FirstComponentInBook;
+	Loop While(oBookComp)
+		Set oBookCompNext = oBookComp.NextComponentInBook;
+		If (oBookComp.bookcomponenttype = BkToc)      // GET TABLE OF CONTENTS
+			Set oTableofContents = oBookComp;
+		EndIf
+		
+		If oBookComp.bookcomponenttype = bklistfigure // GET LIST OF FIGURES
+			Set oListofFigures = oBookComp;
+		EndIf
+		
+		If oBookComp.bookcomponenttype = bklisttable // GET LIST OF TABLES
+			Set oListofTables = oBookComp;
+		EndIf
+		
+		Find String('_AuthorsNotes') 
+		  InString(oBookComp.name) 
+		  ReturnStatus(vAuthorNoteFound);
+		If vAuthorNoteFound  						// GET AUTHORS NOTES FILE IF IT EXISTS
+			Set oAuthorsNotesFile = OpenADoc{oBookComp.name,'None',0,1,vOpenVisibly}; //oTheDoc sSub bSaveDocs bLeaveOpen bMakeVisible
+		EndIf		
+		
+		Set oBookComp = oBookCompNext;
+	EndLoop
+Set sPath = ParseFilePath{oBook.name,'Path'};	
+EndIf
+If not vTemplatePath
+	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
+EndIf
+Set vTemplateFile = vTemplatePath+dirsep+'Inphi_Template.fm';
+//Set vTemplateFile = 'C:\Document_Templates\Inphi_Template.fm';
+New Document NewVar(oFrontMatterDoc) Template(vTemplateFile);
+
+New TextRange NewVar(tTextRange) 
+  Object(oFrontMatterDoc.MainFlowInDoc.FirstPgfInFlow) Offset(0) 
+  Object(oFrontMatterDoc.MainFlowInDoc.LastPgfInFlow) Offset(ObjEndOffset);
+Set oFrontMatterDoc.TextSelection = tTextRange;
+Clear Text DocObject(oFrontMatterDoc);
+
+If oAuthorsNotesFile // IMPORT VARIABLES AND CONDITIONS FROM THE AUTHORS NOTES IF THERE IS ONE.
+	Import Formats DocObject(oFrontMatterDoc) FromDocObject(oAuthorsNotesFile)
+	  Cond Var;
+
+	Get Object Type(VarFmt)  Name(vDocRevVarScanName)
+		NewVar(oDocRevNum) DocObject(oFrontMatterDoc);
+	If (not oDocRevNum)
+		write console 'No '+vDocRevVarScanName+' variable present. Setting Rev. History as X.x';
+		Set vDocRevNum = 'X.x';
+	Else
+		Set vDocRevNum = RemoveVarFormatting{oDocRevNum.fmt}; //vDocTitleObject.fmt};  
+	EndIf
+	Get Object Type(VarFmt)  Name(vDocNumVarScanName)
+		NewVar(oDocNum) DocObject(oFrontMatterDoc);
+	If (not oDocNum)
+		write console 'No '+vDocNumVarScanName+' variable present. Setting Doc. number in file name as "XXXXXX"';
+		Set vDocNum = 'XXXXXX';
+	Else
+		Set vDocNum = RemoveVarFormatting{oDocNum.fmt}; //vDocTitleObject.fmt};  
+	EndIf
+	
+	Close Doc DocObject(oAuthorsNotesFile) IgnoreMods;
+EndIf
+
+Set sTitlePage = ParseFilePath{oBook.name,'File'};
+
+
+DialogBox Type(String) Title('What do you want to name the new Title page?')// Caption('Make-A-FrontMatter')
+	Init(sTitlePage+'_TitlePage') NewVar(vFrontMatterName) Button(vButton);
+If (vButton = CancelButton) LeaveSub; EndIf
+
+If not vDocRevNum
+	Set vDocRevNum = 'X.x';
+EndIf
+If not vDocNum
+	Set vDocNum = 'XXXXXX';
+EndIf
+//-- BookComponent in Book:
+Set oLookBookComp = oBook.FirstComponentInBook;
+Set vFileCounter = 0; 
+Loop While(oLookBookComp)
+	Set oLookBookCompNext = oLookBookComp.NextComponentInBook;
+//	Find String(sPath+vDocNum+'_TitlePage')	InString(oLookBookComp.name) ReturnStatus(vFoundTitlePage);
+	Find String(vFrontMatterName) InString(oLookBookComp.name) ReturnStatus(vFoundTitlePage); //String('_TitlePage')
+	
+	If (vFoundTitlePage)
+		Set vFileCounter = vFileCounter +1;
+	EndIf
+	Set oLookBookComp = oLookBookCompNext;
+EndLoop
+
+If (vFileCounter > 0)
+	Set vDocFileName = spath+vFrontMatterName+ '('+vFileCounter+')'; //sPath+vDocNum+'_TitlePage ('+vFileCounter+').fm';
+Else
+	Set vDocFileName = spath+vFrontMatterName; //sPath+vDocNum+'_TitlePage.fm';
+EndIf
+
+Save Document DocObject(oFrontMatterDoc) File(vDocFileName+'.fm');
+
+New BookComponent BookObject(oBook) NewVar(oBookComp);
+// Set vBkComp.BookComponentType = BkToc;
+Set oBookComp.Name = vDocFileName+'.fm';
+Set oBookComp.GenerateInclude = True;
+
+New StringList NewVar(sDocTypeList)
+	Value('Application Note Template: User Guides, FAQs, and Application Notes') Value('Datasheet Template: Datasheets and Functional Descriptions') Value('Errata Template'); // Value('API User Guide (not working yet)');
+
+Set vInitNr = 0; // 1 = first item preselected;
+DialogBox Type(ScrollBox) Caption('Document Type:')
+	Title('Please select:')
+	Init(vInitNr) List(sDocTypeList)
+	NewVar(vSelString) Button(vButton)
+	ReturnIndex(vSelIndex);
+If (vButton = CancelButton) LeaveSub; EndIf
+Set vDocTypeUsed = sDocTypeList[vSelIndex];
+Find String('datasheet') NoCase InString(vDocTypeUsed)	ReturnStatus(vFoundType)
+If vFoundType
+	Set vPageType = vDSCoverMPScanName;
+Else
+	Set vPageType = vAppCoverMPScanName;
+EndIf
+
+		// Is this an Errata document?
+		Set vDocisErrata = 0;
+		Find String('errata') NoCase InString(vDocTypeUsed)	ReturnStatus(vFoundType)
+		If vFoundType
+			Set vDocisErrata = 1;
+		EndIf	
+
+Set vBPage = oFrontMatterDoc.FirstBodyPageInDoc;
+
+If not vBPage
+	Display 'There seems to be a problem. Please request assistance from Rick Rettinhouse.';
+	If Displaying = 0
+	  Set Displaying = 1;
+	EndIf
+	LeaveScript;
+EndIf
+
+Get Object Type(MasterPage) Name(vPageType)
+	NewVar(vMPage) DocObject(oFrontMatterDoc);
+Set vBPage = oFrontMatterDoc.CurrentPage;
+If not (vMPage or vBPage) LeaveSub; EndIf
+Apply PageLayout Sourcepage(vMPage) Destpage(vBPage);
+If vPageType = vAppCoverMPScanName
+	Delete Object(vBPage.PageFrame.FirstGraphicInFrame); // only put a text frame on datasheet-type front page.
+Endif
+// Make The LegalPage
+Get Object Type(MasterPage) Name(vLegalMPScanName)
+NewVar(vMPage) DocObject(oFrontMatterDoc);
+New BodyPage PrevObject(vBPage)
+	DocObject(oFrontMatterDoc) NewVar(vBPage);
+If not (vMPage or vBPage) LeaveSub; EndIf
+Apply PageLayout Sourcepage(vMPage) Destpage(vBPage);
+
+Delete Object(vBPage.PageFrame.FirstGraphicInFrame); // ensures that there is no text frame on a legal page.
+Update Redisplay;
+If vPageType = vAppCoverMPScanName
+	New BodyPage PrevObject(vBPage)
+		DocObject(oFrontMatterDoc) NewVar(vBPage);
+
+	Set oPgf = oFrontMatterDoc.MainFlowInDoc.LastPgfInFlow;
+
+	Get Object Type(PgfFmt) Name(vHead1NoNumParaScanName) //Name('Heading:NoNum:L1')
+		NewVar(oPgfFmtNoNum1) DocObject(oFrontMatterDoc);
+
+	Get Object Type(PgfFmt) Name(vHead2NoNumParaScanName) // Name('Heading:NoNum:L2')
+		NewVar(oPgfFmtNoNum2) DocObject(oFrontMatterDoc);
+
+	Get Object Type(PgfFmt) Name(vFMAnchorParaScanName) //Name('Frame:Anchor')
+		NewVar(oFrameAnchor) DocObject(oFrontMatterDoc);
+
+	If (not oPgfFmtNoNum1) or (not oPgfFmtNoNum2) or (not oFrameAnchor)
+		Display 'Some important paragraph tags do not exist. Ensure your template is updated...'+charlf+charlf+'Quiting...';
+		LeaveSub;
+	EndIf
+	
+	If not vDocisErrata
+	
+		Set oPgf.properties = oPgfFmtNoNum1.properties;
+		New TextLoc NewVar(vTextLoc) Object(oPgf)
+			Offset(ObjEndOffset-1)
+		New Text TextLoc(vTextLoc) 'Contents';
+
+		//Add The TOC
+		New Pgf PrevObject(oPgf)
+			DocObject(oFrontMatterDoc) NewVar(oPgf)
+			PgfFmtName('Body');
+		New TextLoc NewVar(vTextLoc) Object(oPgf)
+			Offset(ObjEndOffset-1)
+
+		If oTableofContents
+
+			Set vTOCFilePath = oTableofContents.name;
+			Import File(vTOCFilePath)
+			  HowToImport(DoByRef)
+			  TextLoc(vTextLoc);
+		EndIf
+		/*
+		New Pgf PrevObject(oPgf)
+			DocObject(oFrontMatterDoc) NewVar(oPgf)
+			PgfFmtName(oPgfFmtNoNum2);
+		*/
+		Set oPgf.properties = oPgfFmtNoNum2.properties;
+		New TextLoc NewVar(vTextLoc) Object(oPgf)
+			Offset(ObjEndOffset-1)
+		New Text TextLoc(vTextLoc) 'Figures';
+
+		//Add The LOF
+		New Pgf PrevObject(oPgf)
+			DocObject(oFrontMatterDoc) NewVar(oPgf)
+			PgfFmtName('Body');
+		New TextLoc NewVar(vTextLoc) Object(oPgf)
+			Offset(ObjEndOffset-1)
+
+		If oListofFigures
+
+			Set vTOCFilePath = oListofFigures.name;
+			Import File File(vTOCFilePath)
+			  HowToImport(DoByRef)
+			  TextLoc(vTextLoc);
+		EndIf
+
+		/*
+		New Pgf PrevObject(oPgf)
+			DocObject(oFrontMatterDoc) NewVar(oPgf)
+			PgfFmtName(oPgfFmtNoNum2);
+		*/
+		Set oPgf.properties = oPgfFmtNoNum2.properties;
+		New TextLoc NewVar(vTextLoc) Object(oPgf)
+			Offset(ObjEndOffset-1)
+		New Text TextLoc(vTextLoc) 'Tables';
+
+		//Add The LOF
+		New Pgf PrevObject(oPgf)
+			DocObject(oFrontMatterDoc) NewVar(oPgf)
+			PgfFmtName('Body');
+		New TextLoc NewVar(vTextLoc) Object(oPgf)
+			Offset(ObjEndOffset-1)
+
+		If oListofTables
+
+			Set vTOCFilePath = oListofTables.name;
+			Import File File(vTOCFilePath)
+			  HowToImport(DoByRef)
+			  TextLoc(vTextLoc);
+		EndIf
+	EndIf
+	/*
+	New Pgf PrevObject(oPgf)
+		DocObject(oFrontMatterDoc) NewVar(oPgf)
+		PgfFmtName(oPgfFmtNoNum2);
+	*/
+	//Add The Revision History Section
+
+	Set vRevHistExamplePath = vTemplatePath+dirsep+'Rev_History_Example.fm';
+	Set oRevHistExampleDoc = OpenADoc{vRevHistExamplePath,'None',0,1,0}; // leave open, don't save, make visible (you must close it manually later)
+
+	Set oPgf.properties = oPgfFmtNoNum2.properties;
+	New TextLoc NewVar(vTextLoc) Object(oPgf)
+		Offset(ObjEndOffset-1)
+	New Text TextLoc(vTextLoc) 'Revision History';
+
+	New Pgf PrevObject(oPgf)
+		DocObject(oFrontMatterDoc) NewVar(oPgf)
+		PgfFmtName(vFMAnchorParaScanName) //PgfFmtName('Frame:Anchor');
+	New TextLoc NewVar(vTextLoc) Object(oPgf)
+		Offset(ObjEndOffset-1)
+		
+	//-- Table/Row/Cell/Pgf:
+	Set vGotit = 0;
+
+	Set oRevHistExampleFlow = oRevHistExampleDoc.MainFlowInDoc;
+	// Find the first paragraph in the flow.
+	Set oRevHistExamplePgf = oRevHistExampleFlow.FirstPgfInFlow;
+	// Loop through the paragraphs.
+	Loop While(oRevHistExamplePgf)
+		// Now test for tables in the paragraph.
+		Get TextList InObject(oRevHistExamplePgf) NewVar(vRevHistExampleTlist) TblAnchor;
+		// If there are one or more tables, this loop will be entered.
+		Loop While (x <= vRevHistExampleTlist.Count) LoopVar(x) Init(1) Incr(1)
+			Get Member Number(x) From(vRevHistExampleTlist) NewVar(vRevHistExampleTblAnchor);
+			Set TextSelection = oRevHistExamplePgf.textrange;
+			Set vGotit = 1;
+			New TextRange NewVar(oAnchTR)
+			  Object(oRevHistExamplePgf) Offset(iAnchorOffset) Offset(iAnchorOffset+1);
+			Set oRevHistExampleDoc.TextSelection = oAnchTR;
+			Copy Text DocObject(oRevHistExampleDoc);
+//			Cut Text DocObject(oRevHistExampleDoc);
+			LeaveLoop;
+		EndLoop
+		If vGotit = 1
+			leaveloop;
+		EndIf
+		Set oRevHistExamplePgf = oRevHistExamplePgf.NextPgfInFlow;
+	EndLoop
+
+	// Past the captured text
+//	New Text TextLoc(vTextLoc) vRevHistExampleTblAnchor;
+	Close Doc DocObject(oRevHistExampleDoc) IgnoreMods;
+	Set textselection = oPgf.textrange;
+	Paste Text DocObject(oFrontMatterDoc);
+
+
+	
+/*
+	//Add The Revision History Table
+	New Pgf PrevObject(oPgf)
+		DocObject(oFrontMatterDoc) NewVar(oPgf)
+		PgfFmtName(vFMAnchorParaScanName) //PgfFmtName('Frame:Anchor');
+	New TextLoc NewVar(vTextLoc) Object(oPgf)
+		Offset(ObjEndOffset-1)
+
+	Set errorcode = 0;
+		New MetricList NewVar(vTblWidths) Value(468);
+
+	New Table NewVar(vTbl)
+		TextLoc(vTextLoc)
+		Format(vRevHistTableScanName) NumCols(1) //Format('Table:RevHistory')
+		HeaderRows(1) BodyRows(1) FooterRows(0);
+	If (errorcode = 0);
+		//Ensure Column Width
+		Set vTbl.TblColWidths = vTblWidths;
+
+		//-- Table/Row/Cell/Pgf:
+		Set vRow = vTbl.FirstRowInTbl;
+		Set vCell = vRow.FirstCellInRow;
+		Set vRevTablePgf = vCell.FirstPgf;
+		New TextLoc NewVar(vHeadingRowTL) Object(vRevTablePgf)
+		  Offset(ObjEndOffset-1);
+
+		New Text TextLoc(vHeadingRowTL) 'Revision '+vDocRevNum; //X.X';
+
+		// Create a New PGF for the Date Line				
+		New Pgf PrevObject(vRevTablePgf) DocObject(oFrontMatterDoc) NewVar(vNewRevTablePgf);
+		New TextLoc NewVar(vHeadingRowTL) Object(vNewRevTablePgf)
+		  Offset(ObjEndOffset-1);
+		Run GetTimeDate Returns vMonth vDay vYear vMin vHour vRealMonth;
+		Set vFormattedDate = vDay+' '+vRealMonth+' '+vYear;
+
+		New Text TextLoc(vHeadingRowTL) 'Revision Date: '+vFormattedDate;
+
+		Set vRow = vRow.NextRowInTbl;
+		Set vCell = vRow.FirstCellInRow;
+		Set vRevTablePgf = vCell.FirstPgf;
+		New TextLoc NewVar(vBodyRowTL) Object(vRevTablePgf)
+		  Offset(ObjEndOffset-1)
+		New Text TextLoc(vBodyRowTL) 'Add your revision history entries here!';
+		Get Object Type(PgfFmt) Name(vTblCellLeftParaScanName) // Name('Table:Cell:Left')
+			NewVar(vCellBodyObject) DocObject(oFrontMatterDoc);
+		Set vTestForRevHistory = 1;
+		If (not vCellBodyObject);
+			Set vTestForRevHistory = 'Created Revision History entry, but could not change the style';
+		Else
+			Set vRevTablePgf.properties = vCellBodyObject.Properties;
+		EndIf
+	Else
+		Set vTestForRevHistory = 'Found Revision History, but no Revision History Table Format. '
+		+charlf+'No Revision History entry was added.';
+	EndIf
+*/
+
+	// modify all "Rev. History tables to standard size
+	If (vTestForRevHistory = 1)
+
+		//-- Table in Doc:
+		Set vRevHistTbl = oFrontMatterDoc.FirstTblInDoc;
+		Loop While(vRevHistTbl)
+			Set vRevHistTblNext = vRevHistTbl.NextTblInDoc;
+
+			If (vRevHistTbl.TblTag = vRevHistTableScanName) //Table:RevHistory
+				Set vRevHistTbl.TblColWidths = vTblWidths;
+			EndIf
+			Set vRevHistTbl = vRevHistTblNext;
+		EndLoop
+	EndIf
+EndIf
+
+Save Document DocObject(oFrontMatterDoc);
+Close Doc DocObject(oFrontMatterDoc) IgnoreMods;
+
+Update Book BookObject(oBook)	// [6.0+]
+Save Book BookObject(oBook);
+
+If Displaying = 0
+  Set Displaying = 1;
+EndIf
+
+Display 'Done!'+charlf+charlf+
+		'A new title page has been created and added to your book (if a book was open)';
+
+LeaveScript;
+
+// ---------------------------------------------------
+Sub CompareVariables
+
+//-- Variable Format:
+//sMissingVarNames
+Set vCompVarFmt = oFrontMatterDoc.FirstVarFmtInDoc;
+Loop While(vCompVarFmt)
+	Set vCompVarFmtNext = vCompVarFmt.NextVarFmtInDoc;
+	If vCompVarFmt.SystemVar = 0
+		Find Member(vCompVarFmt.name) InList(sTempUserVars)	ReturnStatus(vFoundTempVar);
+		Find Member(vCompVarFmt.name) InList(sMissingVarNames)	ReturnStatus(vVariableName);		
+		If (not vFoundTempVar)
+			If (not vVariableName)
+				Add Member(vCompVarFmt.name) To(sMissingVarNames);
+			EndIf
+		EndIf
+	EndIf
+	Set vCompVarFmt = vCompVarFmtNext;
+EndLoop
+
+EndSub
+// ---------------------------------------------------
+
+Sub GetTimeDate Returns vMonth vDay vYear vMin vHour vRealMonth;
+
+New StringList NewVar(sMonthList)
+	Value('January') Value('February') Value('March')
+	Value('April') Value('May') Value('June')
+	Value('July') Value('August') Value('September')
+	Value('October') Value('November') Value('December');
+		
+	// Set The Doc Date Variable to Today's Date
+	New EDateTime NewVar(vEDT1) Value('CurrTime');
+	Run vEDT1.Format FormatStr('%#m') NewVar(vMonth);
+	Run vEDT1.Format FormatStr('%d') NewVar(vDay);
+	Run vEDT1.Format FormatStr('%Y') NewVar(vYear);
+   Run vEDT1.Format FormatStr('%H') NewVar(vHour);
+	Run vEDT1.Format FormatStr('%M') NewVar(vMin);
+	Run vEDT1.Format FormatStr('%S') NewVar(vSec);
+	Get Member Number(vMonth) From(sMonthList) NewVar(vRealMonth);
+EndSub
+// ---------------------------------------------------
+
+
+Function RemoveVarFormatting Using sFmt
+
+Local Result(NULL); // Initialize the Result variable.
+
+	Set oRegex = InitializeXObject{'VBScript.RegExp'};
+	If oRegex = 0
+	  LeaveSub;
+	EndIf
+	 
+	// Set the regular expression parameters.
+	// Match along the entire string.
+	Set oRegex.Global = True;
+	// Set the pattern to match.
+	Set oRegex.Pattern = '<[^>]+>';
+	 
+	// Test for a match.
+	If oRegex.Test{sFmt}
+	  // Execute all matches along the string.
+	  Set oMatch = oRegex.Execute{sFmt};
+	  // Loop through the matches.
+	  Loop While(vMatchCnt < oMatch.Count) LoopVar(vMatchCnt) Init(0) Incr(1)
+	    // Replace the match with nothing.
+	    Set sFmt = eStr.ReplaceFirst{sFmt,oMatch[vMatchCnt].Value,''};  // This variable must be "sFmt" for the loop to work.
+	  EndLoop
+	EndIf
+
+	Set Result = sFmt;
+
+EndFunc
+//---------------------------------------------------------
+
+				
+Function InitializeXObject sProgId
+//
+Local Result(0);
+ 
+// Create the object.
+New EActiveXObject NewVar(Result) ProgId(sProgId);
+If Result.ErrorCode <> 0
+	Write Console sProgId + ' could not be initialized.';
+	Write Console 'ErrorCode: '+Result.ErrorCode;
+	Set Result = 0;
+EndIf
+//
+EndFunc 
+//---------------------------------------------------------
+
+//********   Functions   ********
+
+Function ParseFilePath Using sPath sReturnType
+/*
+ParseFilePath Version 1.1 January 7, 2004
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vPath = ParseFilePath{'C:\Scripts\CSA\Test.fsl','Path'};
+
+ParseFilePath takes a path name and parses it into component parts.
+sPath is a path and file name. sReturnType is a string that specifies 
+which part of the path is returned from the function.
+
+'Path' returns the path, including the last directory separator.
+'File' returns the file name without the path or extension.
+'Ext' returns the extension or a NULL string if there is no extension.
+'PathFile' returns the path and file without the file extension.
+'FileExt' returns the file name and extension without the path.
+
+You should initialize the ErrorCode variable before calling the function.
+If the color is created successfully, ErrorCode will be 0 after the
+function completes. Otherwise, ErrorCode will be a non-zero number.
+*/
+Local Result(NULL); // Initialize the Result variable.
+Set ErrorCode = 0; // Initialize the ErrorCode variable.
+
+// See if either of the parameters are missing.
+If (Args[1] = NULL) or (Args[2] = NULL)
+  Set ErrorCode = -2407; // Set the ErrorCode to Missing Parameter.
+  LeaveSub;
+EndIf
+
+// Test the sReturnType parameter.
+If eStr.Equal{sReturnType,'Path','NoCase'}
+  Run eSys.ExtractPathName FileName(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'File','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+  Run eSys.RemoveFileExtension FullPath(Result) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'FileExt','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'PathFile','NoCase'}
+  Run eSys.RemoveFileExtension FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'Ext','NoCase'}
+  Run eSys.ExtractFileExtension FullPath(sPath) NewVar(Result);
+Else
+  Set ErrorCode = -43; // Set the ErrorCode to Bad Parameter.
+EndIf
+//
+EndFunc 
+//---------------------------------------------------------
+
+Function OpenADoc Using oTheDoc sSub bSaveDocs bLeaveOpen bMakeVisible
+
+/*
+OpenADoc Version 1.0 October 20, 2007 (based on the ProcessBook function)
+
+Set oResult = OpenADoc{'C:\Document_Template\sample.fm',subroutinename,1,0};
+
+Parameters: 1. Document to open
+			2. Subroutine to run after opening --> 	Use 'None' to not run a subroutine
+													and leave document open
+ 			3. Don't save the document -->			1 = Save, 0 = Don't save
+ 			4. Leave the Document open -->			1 = Leave Open, 0 = Close document
+			5. Make the document visible -->		1 = visible, 0 = invisible
+
+Requires IsDocOpen functions.
+
+OpenADoc takes a document object (oTheDoc) and a subroutine name (sSub). 
+It opens the document and runs the subroutine name on that 
+document. The bSaveDocs parameter determines if each component is saved 
+after it is processed. Some subroutines simply collect information
+from book components, so it is not necessary to save the documents after 
+they are processed.
+
+The function returns the document object. Errors will be written to the console.
+*/
+
+Set Result = NULL;
+Set oTemporaryDoc = IsDocOpen{oTheDoc};
+
+/*
+If (bLeaveOpen = 1) or (sSub = 'None')
+	Set vMakeVisible = 1;
+Else
+	Set vMakeVisible = 0;
+EndIf
+*/
+If oTemporaryDoc.ObjectName = 'Doc'
+	Set bDocIsOpen = 1; // Indicates that the document is already open.
+Else
+    Set bDocIsOpen = 0; // Indicates that the document was not already open.
+    Set oTemporaryDoc = 0; // Reset the document variable
+    Set ErrorCode = 0;
+    // Attempt to open the book component.
+    Open Document File(oTheDoc) NewVar(oTemporaryDoc)
+      UpdateTextReferences(No) UpdateXRefs(No) 
+      RefFileNotFound(AllowAllRefFilesUnFindable)
+      FontNotFoundInDoc(OK) FileIsOldVersion(OK)
+      MakeVisible(bMakeVisible) AlertUserAboutFailure(False);
+    // If the document can't be opened, write a message to the Console.
+    If ErrorCode not= 0
+      Write Console 'The document '+oBookComp.Name+' could not be opened.';
+      LeaveSub;
+    EndIf
+EndIf
+If sSub not ='None'
+	Run sSub oOpenedDoc(oTemporaryDoc);
+Else
+	Set Result = oTemporaryDoc;
+	LeaveSub;
+EndIf
+
+If (bDocIsOpen = 0) and (bLeaveOpen not = 1)
+	If bSaveDocs = 1 // Test the bSaveDocs parameter.
+		Save Document DocObject(oTemporaryDoc);
+	EndIf
+	Close Document DocObject(oTemporaryDoc) IgnoreMods;
+EndIf
+Set Result = oTemporaryDoc;
+
+EndFunc 
+//---------------------------------------------------------
+
+Function IsDocOpen Using sFileName
+/*
+IsDocOpen Version 1.0 December 26, 2003
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vDoc = IsDocOpen{'C:\Templates\MainTemplate.fm'};
+
+IsDocOpen takes a complete file path and sees if the FrameMaker document
+represented by the path is currently open in FrameMaker. It returns
+the document or book object if it is open, or NULL if it is not.
+
+You should test the ObjectName of the returned Result to see if it is
+a Doc object or Book object.
+*/
+
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local oDoc(NULL);
+
+// Loop through the list of open documents.
+Loop ForEach(Doc) In(Session) LoopVar(oDoc)
+  // See if the document name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the document object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+
+// Loop through the list of open books.
+Loop ForEach(Book) In(Session) LoopVar(oDoc)
+  // See if the book name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the book object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+//
+EndFunc //--------------------------------------------------------------------
+
+Function ParseFilePath Using sPath sReturnType
+/*
+ParseFilePath Version 1.1 January 7, 2004
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vPath = ParseFilePath{'C:\Scripts\CSA\Test.fsl','Path'};
+
+ParseFilePath takes a path name and parses it into component parts.
+sPath is a path and file name. sReturnType is a string that specifies 
+which part of the path is returned from the function.
+
+'Path' returns the path, including the last directory separator.
+'File' returns the file name without the path or extension.
+'Ext' returns the extension or a NULL string if there is no extension.
+'PathFile' returns the path and file without the file extension.
+'FileExt' returns the file name and extension without the path.
+
+You should initialize the ErrorCode variable before calling the function.
+If the color is created successfully, ErrorCode will be 0 after the
+function completes. Otherwise, ErrorCode will be a non-zero number.
+*/
+Local Result(NULL); // Initialize the Result variable.
+Set ErrorCode = 0; // Initialize the ErrorCode variable.
+
+// See if either of the parameters are missing.
+If (Args[1] = NULL) or (Args[2] = NULL)
+  Set ErrorCode = -2407; // Set the ErrorCode to Missing Parameter.
+  LeaveSub;
+EndIf
+
+// Test the sReturnType parameter.
+If eStr.Equal{sReturnType,'Path','NoCase'}
+  Run eSys.ExtractPathName FileName(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'File','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+  Run eSys.RemoveFileExtension FullPath(Result) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'FileExt','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'PathFile','NoCase'}
+  Run eSys.RemoveFileExtension FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'Ext','NoCase'}
+  Run eSys.ExtractFileExtension FullPath(sPath) NewVar(Result);
+Else
+  Set ErrorCode = -43; // Set the ErrorCode to Bad Parameter.
+EndIf
+//
+EndFunc 
+//---------------------------------------------------------

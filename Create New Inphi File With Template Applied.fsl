@@ -1,0 +1,71 @@
+Run Main;
+EndSub
+// ------------------------------------
+Sub Main
+If displaying = 1
+	Set Displaying = 0;
+EndIf 
+
+//	Set sFile = 'C:\Document_Templates\Inphi_Template.fm';
+//	Set sFile = 'C:\Document_Templates\Inphi_Template.fm';
+If not vTemplatePath
+	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
+EndIf
+
+New StringList NewVar(vList)
+	Value('Original Inphi Template') Value('New Inphi Template');
+
+Set vInitNr = 1; // 1 = first item preselected;
+DialogBox Type(ScrollBox) Caption('Which Template?')
+	Title('Please select')
+	Init(vInitNr) List(vList)
+	NewVar(vSelString) Button(vButton)
+	ReturnIndex(vSelIndex);
+If (vButton = CancelButton) LeaveSub; EndIf
+
+	If vSelIndex = 1
+		Set sTemplateFileName = 'Inphi_Template.fm';
+	EndIf
+
+	If vSelIndex = 2
+		Set sTemplateFileName = 'Inphi_New_Template.fm';
+	EndIf
+
+	Set sFile = vTemplatePath+dirsep+sTemplateFileName;
+//	Set sFile = vTemplatePath+dirsep+'Inphi_Template.fm';
+	New Document NewVar(oDoc) Template(sFile);
+
+	//-- Paragraph in Doc:
+	Set vPgf = oDoc.FirstPgfInDoc;
+	Set vFirstPgf = oDoc.FirstPgfinMainFlow;
+	Set vLastPgf = oDoc.Lastpgfinmainflow;
+
+
+	New TextRange NewVar(vFullDocTR)
+		Object(vFirstPgf) Offset(0)
+		Object(vLastPgf) Offset(ObjEndOffset);
+	Delete Text TextRange(vFullDocTR);
+
+	// get the normal body para format and create the object
+	Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+		ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+	New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+	Set vTempBodyName = vBatchScript.ScanMasterTable{'P','Body'};
+	Get Object Type(PgfFmt) Name(vTempBodyName)
+		NewVar(oBodyPgf) DocObject(oDoc);
+
+	If (not oBodyPgf) LeaveSub; EndIf
+	
+	Set vFirstPgf = oDoc.FirstPgfinMainFlow;
+	Set vFirstPgf.properties = oBodypgf.properties;	
+If Displaying = 0
+  Set Displaying = 1;
+EndIf
+	Update DocObject(ActiveDoc) XRefs Everything;
+
+
+
+
+
+EndSub
+//!REVHIST=[05-25-2012] Fixed blank Cortina document routine top blank paragraph is a BODY paragraph.

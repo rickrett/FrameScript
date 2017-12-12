@@ -1,0 +1,765 @@
+
+If not ActiveBook
+	Display 'A book file must be active... Try again.';
+	LeaveSub;
+Else
+	Set oBook = ActiveBook;
+EndIf
+
+// Initialization Section
+
+// Items based on Template for comparison with AuthorNotes
+New StringList NewVar(vTemplateVariables);
+New StringList NewVar(vTemplateConditions);
+
+// Variables and Conditions from Author's Notes file for comparison to template
+// (Used to generate the list of document specific variables and conditions that aren't in the template)
+New StringList NewVar(vSpecVarFormatsInCatalog);
+New StringList NewVar(vSpecVarDescriptionsInCatalog);
+New StringList NewVar(vSpecCondFormatsInCatalog);
+New StringList NewVar(vSpecConditionShowing);
+New StringList NewVar(vConditionShowing);
+
+If displaying = 1
+	Set Displaying = 0;
+EndIf 
+
+
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+New ScriptVar NewVar(vBatchScript) File(vscript_GenFunctions);
+
+Set vBodyParaName = vBatchScript.ScanMasterTable{'P','Body'};
+Set vFMAnchorParaName = vBatchScript.ScanMasterTable{'P','Frame:Anchor'};
+Set vSideHeadCharName = vBatchScript.ScanMasterTable{'C','zz_{Sidehead:VerdanaBold}'};
+Set vDocNumVarName = vBatchScript.ScanMasterTable{'V','Doc:Num'};
+
+
+If not vTemplatePath
+	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
+EndIf
+Set vFilePath = vTemplatePath+dirsep+'Inphi_Template.fm';
+
+//Set vFilePath = 'C:\Document_Templates\Inphi_Template.fm';
+Set oTemplateDoc = OpenADoc{vFilePath,ProcessTemplateandMakeContactPage,0,0};
+
+Run ProcessContactPage;
+Run ProcessAuthorsNotesPage;
+// Close Files
+// Set ActiveDoc = oContactDoc;
+Close Document DocObject(oContactDoc) IgnoreMods;
+Close Document DocObject(oAuthorsNote) IgnoreMods;
+
+If Displaying = 0
+  Set Displaying = 1;
+EndIf
+// LeaveScript;
+// ----------------------------------------------------------
+
+Sub ProcessTemplateandMakeContactPage
+
+If (oOpenedDoc)
+
+	// Get Variable Formats for AuthorsNotes
+	Loop ForEach(VarFmt) In(oOpenedDoc) LoopVar(vVarFmt)
+		If (vVarFmt.SystemVar = VarUserVariable)
+			Add Member(vVarFmt.Name) To(vTemplateVariables);
+		EndIf
+	EndLoop
+	
+	//Get Condition Formats for AuthorsNotes
+	Loop ForEach(CondFmt) In(oOpenedDoc) LoopVar(vCondFmt)
+		Add Member(vCondFmt.Name) To(vTemplateConditions);
+	EndLoop
+	
+	// Create and Modify a New Document for the Contact page
+	New Document NewVar(oContactDoc) Portrait;
+	Import Formats
+	  DocObject(oContactDoc) FromDocObject(oOpenedDoc) 
+	     Pgf Font Page Table Cond RefPage Var XRef Color Math CombinedFonts DocumentProps;  
+
+Else
+	Display 'Did not find the template in C:\Document_Templates. Something is broken.';
+EndIf
+EndSub
+// ----------------------------------------------------------
+
+Sub ProcessContactPage
+
+Get Object Type(MasterPage) Name('LastPage')
+ NewVar(vMPage) DocObject(oContactDoc);
+ 
+Set vBPage = oContactDoc.CurrentPage;
+
+If not (vMPage or vBPage)
+	display 'No current page in the contact page document. Leaving script.'
+	LeaveSub;
+EndIf
+Apply PageLayout Sourcepage(vMPage) Destpage(vBPage);
+// Remove the Frame from the contact page.
+Set oContactPageFrame = oContactDoc.CurrentPage.PageFrame.FirstGraphicInFrame;
+Delete Object(oContactPageFrame);
+Update Redisplay;
+
+//-- BookComponent in Book:
+Set oFirstDocInBook = oBook.FirstComponentInBook;
+Set vFilePath = oFirstDocInBook.name;
+Set oImportDocument = oContactDoc;
+Set oFirstDocumentinBook = OpenADoc{vFilePath,ImportCondsAndVariables,0,0};
+
+Get Object Type(VarFmt) Name(vDocNumVarName) NewVar(oDocNum) DocObject(oContactDoc); //Name('Doc:Num')
+If (not oDocNum)
+	Set vDocumentNumber = 'NONE';
+	Display 'The '+vDocNumVarName+' variable does not seem to exist. Listing the document number as NONE';
+Else
+	Set vFullVarFormat = oDocNum.fmt;
+	Run GetDocNumber;
+EndIf
+	Set vBookPath = ParseFilePath{oBook.name,'Path'};
+	Set vFileName = vBookPath+vDocumentNumber+'_LastPage.fm';
+
+	Save Document DocObject(oContactDoc)
+	  File(vFileName) //-- re/name
+	  FileIsInUse(ResetLockAndContinue)
+	  LockCantBeReset(Cancel)
+	  AlertUserAboutFailure(False);
+	Run AddTheFile oBookComp(oContactDoc);
+
+	Set ActiveBook = oBook;
+EndSub
+
+// ----------------------------------------------------------
+Sub AddTheFile
+
+Set vFirstGeneratedFile = 0;
+//-- BookComponent in Book:
+Set vChapterName = oBook.FirstComponentInBook;
+Loop While(vChapterName)
+	Set vChapterNameNext = vChapterName.NextComponentInBook;
+
+	If oBookComp.name = vChapterName.name
+		LeaveSub
+	EndIf
+
+	Set vChapterName = vChapterNameNext;
+EndLoop
+
+// display oBook.properties;
+
+// Add the document to the book.
+New BookComponent BookObject(oBook) NewVar(oBookComp);
+Set oBookComp.Name = vFileName;
+
+Set oBookComp.NextComponentInBook = 0;
+
+// Set the page numbering to Continue.
+Set oBookComp.PageNumComputeMethod = NumContinue;
+// Set the paragraph numbering to Continue.
+Set oBookComp.PgfNumComputeMethod = NumContinue;
+
+EndSub
+// ----------------------------------------------------------
+
+
+Sub ProcessAuthorsNotesPage
+
+//-- Test to see if AuthorNote File already exists in the book
+Set vFoundANFileFlag = 0;
+Set oBookComp = oBook.FirstComponentInBook;
+Loop While(oBookComp)
+	Set oBookCompNext = oBookComp.NextComponentInBook;
+	Find String('AuthorsNotes') InString(oBookComp.name) ReturnStatus(vANFound);
+	If vANFound
+		Set oAuthorsNote = OpenADoc{oBookComp.name,'None',0,0};
+		Set vFoundANFileFlag = 1;
+		LeaveLoop;
+	EndIf
+	Set oBookComp = oBookCompNext;
+EndLoop
+
+// If an author's notes file isn't in the book, open the authorsnotes template file.
+If (vFoundANFileFlag = 0)
+	Set vFilePath = vTemplatePath+dirsep+'_AuthorsNotes_Do_Not_Distribute.fm';
+	Set oAuthorsNote = OpenADoc{vFilePath,'None',0,0};
+	// Generated Tables are cleared in the LoadVariablesandConditions routine
+EndIf
+
+If (not oAuthorsNote)
+	Display 'Something is Broken. I could not open the AuthorNote file in the book. '+charlf+charlf+'Contact Rick...';
+	LeaveSub
+EndIf
+
+// SO FAR, THE AUTHORSNOTES FILE IS OPENED. Now we need to Modify it for the current book.
+
+Set iResult = ProcessBook{oBook,'LoadVariablesandConditions',1};
+If iResult not= 0
+	MsgBox iResult + ' book components were not processed.    '+CHARLF+
+	  'See the Console window for details.    ';
+EndIf
+
+//Import variables and conditions
+If oContactDoc
+	Import Formats
+	  DocObject(oAuthorsNote) FromDocObject(oContactDoc) 
+	     Cond Var;
+	Close Document DocObject(oContactDoc) IgnoreMods;
+
+Else
+	Display 'Contact Page does not seem to exist (or is not open).'+charlf+charlf+'Importing from first doc in book.';
+	Set oImportDocument = oAuthorsNote;
+	Set oFirstDocumentinBook = OpenADoc{vFilePath,ImportCondsAndVariables,0,0};
+EndIf
+
+Get Object Type(PgfFmt) Name(vBodyParaName) NewVar(vTitlePara) DocObject(oAuthorsNote); // Name('Body')
+Get Object Type(PgfFmt)  Name(vFMAnchorParaName) NewVar(vFAPara) DocObject(oAuthorsNote); // Name('Frame:Anchor')
+
+Get Object Type(CharFmt) Name(vSideHeadCharName) NewVar(vTitleCharFmt) DocObject(oAuthorsNote); //Name('zz_{Sidehead:VerdanaBold}')
+New PropertyList Chartag(vSideHeadCharName) NewVar(tCharProps) DocObject(oAuthorsNote); //CharTag('zz_{Sidehead:VerdanaBold}')
+
+If (not vTitlePara) or (not vTitleCharFmt)
+	display 'Something is wrong with the _AuthorNotes File. Contact Rick for a new one.';
+	LeaveSub;
+EndIf
+
+// Find the DocSpec tables and clean them up
+//-- Table/Row/Cell/Pgf:
+Set vSpecTbl = oAuthorsNote.FirstTblInDoc;
+Loop While(vSpecTbl)
+	If (vSpecTbl.Page.ObjectName = 'BodyPage')
+		Find String('AutoGen:DocSpecVar')
+		  InString(vSpecTbl.firstpgf.text) ReturnStatus(vFoundDocSpecVar);
+		If vFoundDocSpecVar //-- Specific Variables
+			Run TweakTheRows 
+			  vSpecFormats(vSpecVarFormatsInCatalog) vSpecDef(vSpecVarDescriptionsInCatalog)
+			  vSpecTbl(vSpecTbl);
+		EndIf //-- vFoundDocSpecVar
+		Delete Var(vFoundDocSpecVar); 
+
+		Find String('AutoGen:DocSpecCond')
+		  InString(vSpecTbl.firstpgf.text) ReturnStatus(vFoundDocSpecCond);
+		If vFoundDocSpecCond //-- Specific Conditions
+			Run TweakTheRows 
+			  vSpecFormats(vSpecCondFormatsInCatalog) vSpecDef(vSpecConditionShowing)
+			  vSpecTbl(vSpecTbl);
+		EndIf //-- vFoundDocSpecCond
+	EndIf //-- BodyPage
+	Set vSpecTbl = vSpecTbl.NextTblInDoc;
+EndLoop //-- Table
+// LeaveScript;
+
+
+// Get the document number and add it to the AuthorNotes
+Get Object Type(VarFmt) Name(vDocNumVarName) NewVar(oDocNum) DocObject(oAuthorsNote); //Name('Doc:Num')
+If (not oDocNum)
+	Set vDocumentNumber = 'NONE';
+Else
+	Set vFullVarFormat = oDocNum.fmt;
+	Run GetDocNumber;
+EndIf
+// Save the Author's Notes file and add it to the book file.
+Set vBookPath = ParseFilePath{oBook.name,'Path'};
+Set vFileName = vBookPath+vDocumentNumber+'_AuthorsNotes_Do_Not_Distribute.fm';
+Save Document DocObject(oAuthorsNote)
+  File(vFileName) //-- re/name
+  FileIsInUse(ResetLockAndContinue)
+  LockCantBeReset(Cancel)
+  AlertUserAboutFailure(False);
+Run AddTheFile  oBookComp(oAuthorsNote);
+	
+EndSub
+// ----------------------------------------------------------
+
+Sub TweakTheRows
+
+/* For Testing Only
+Loop While(uu <= vSpecFormats.Count) LoopVar(uu) InitVal(1) Incr(1)
+	If not sTESTList
+		Set sTESTList = vSpecFormats[uu];
+	Else
+		Set sTESTList = sTESTList+charlf+vSpecFormats[uu];
+	EndIf
+EndLoop
+*/
+
+// Find and remove items that don't belong in the table anymore
+Set vSpecRow = vSpecTbl.FirstRowInTbl;
+Loop While(vSpecRow)
+	If (vSpecRow.RowType = RowBody) // RowBody RowHeading RowFooting
+		Set vSpecCell = vSpecRow.FirstCellInRow;
+		Find Member(vSpecCell.FirstPgf.text) InList(vSpecFormats) ReturnStatus(vFoundNewSpecItem);
+		// If the text in the first cell of the row isn't in the table, delete the row
+		
+		
+		If (not vFoundNewSpecItem)
+			//-- Cell in Row:
+			Loop While(vSpecCell)
+				Set vSpecCellNext = vSpecCell.NextCellInRow;
+				//-- Pgf in Cell:
+				Set vSpecPgf = vSpecCell.FirstPgf;
+				Loop While(vSpecPgf)
+					Set vSpecPgfNext = vSpecPgf.NextPgfInFlow;
+					Delete Text TextRange(vSpecPgf.textrange);
+					
+					Set vSpecPgf = vSpecPgfNext;
+				EndLoop				
+				Set vSpecCell = vSpecCellNext;
+			EndLoop
+		Else //-- the stuff in the row exists in the stringlist;
+			// Remove pre-existing items from the new var and cond lists
+			Remove Member(vSpecCell.FirstPgf.text) From(vSpecFormats);
+		EndIf //-- Check contents of first row text
+	EndIf //-- RowBody
+	Set vSpecRow = vSpecRow.NextRowInTbl;
+EndLoop //-- First Pass through Rows
+
+// Create and fill the new row(s)
+Set vSpecRow = vSpecTbl.FirstRowInTbl;// Heading row
+Set vSpecRow = vSpecRow.NextRowInTbl; // First non-heading row
+
+Loop While(FmtCnt <= vSpecFormats.Count) LoopVar(FmtCnt) InitVal(1) Incr(1)
+	Get Member Number(FmtCnt) From(vSpecFormats) NewVar(vListMember);
+	New TableRows TableObject(vSpecTbl) RowObject(vSpecRow)
+	  Direction(Below) BodyRows(1);
+	Set vSpecRow = vSpecRow.NextRowInTbl;
+	Set vNewCell = vSpecRow.FirstCellInRow;
+	New Text TextLoc(vNewCell.FirstPgf) (vSpecFormats[FmtCnt]) NewVar(vItemName);
+	Set vNewCell = vNewCell.NextCellInRow;
+	//Check to see if the item is a condition
+
+
+	Get Object Type(CondFmt) Name(vSpecFormats[FmtCnt]) NewVar(vConditionObject) DocObject(oAuthorsNote);
+	If (not vConditionObject) // This is a variable
+		// Show definition text in second column
+		New Text TextLoc(vNewCell.FirstPgf) (vSpecDef[FmtCnt]) NewVar(vItemDefinition);
+		Set vNewCell = vNewCell.NextCellInRow;
+
+		// Use the variable definition (example column)
+		Get Object Type(VarFmt) Name(vSpecFormats[FmtCnt])
+		  NewVar(vVarObject) DocObject(oAuthorsNote);
+		If (not vVarObject)  	
+			New Text TextLoc(vNewCell.FirstPgf) ('Does not exist') NewVar(vVariableDescription);
+		Else
+			New TextLoc NewVar(tTextLoc) Object(vNewCell.FirstPgf) Offset(ObjEndOffset-1);
+			New Variable Format(vSpecFormats[FmtCnt]) TextLoc(tTextLoc);
+		EndIf 
+	Else // This is a condition
+		New Text TextLoc(vNewCell.FirstPgf) (' ') NewVar(vUsageColumn); //Blank Usage column
+		Set vNewCell = vNewCell.NextCellInRow;
+		
+		New Text TextLoc(vNewCell.FirstPgf) ('Looks Like') NewVar(vShowingCondition); //Conditionalize "looks like"
+		Set vCondName = vSpecFormats[FmtCnt];
+		Set vPgftoCond = vNewCell.FirstPgf;
+		Run ConditionalizeText vCondName(vCondName) PgftoCond(vPgftoCond);
+/*		If vCondFmt.CondFmtIsShown = 1
+			New Text TextLoc(vNewCell.FirstPgf) (' (Indicator not shown)') NewVar(vShowingCondition); //Conditionalize "looks like"
+		EndIf
+*/
+	EndIf
+	
+EndLoop
+
+// Find and remove rows that don't belong in the table anymore
+Set vSpecRow = vSpecTbl.FirstRowInTbl;
+Loop While(vSpecRow)
+	Set vNextRow = vSpecRow.NextRowInTbl; 
+	If (vSpecRow.RowType = RowBody) // RowBody RowHeading RowFooting
+		Set vSpecCell = vSpecRow.FirstCellInRow;
+		If vSpecCell.text = ''
+			If vSpecCell.NextCellinRow.text = ''
+				If vSpecCell.NextCellinRow.NextCellinRow.text = ''
+					Set vKillTheRow = 1;
+				EndIf
+			EndIf					
+		EndIf
+	EndIf //-- RowBody
+	If (vKillTheRow = 1)
+		Delete TableRows TableObject(vSpecTbl)
+		  RowObject(vSpecRow) NumRows(1);
+	EndIf
+	Set vKillTheRow = 0;	
+	
+	Set vSpecRow = vNextRow;
+EndLoop //-- First Pass through Rows
+			
+EndSub
+// ----------------------------------------------------------
+
+Sub ConditionalizeText
+
+// Make an integer list.
+New IntList NewVar(vInCond);
+
+// Get the Online condition format object.
+Get Object Type(CondFmt) Name(vCondName) DocObject(oAuthorsNote) NewVar(vCondFmt);
+
+// Convert the condition format object to an integer.
+New Integer NewVar(vCondInt) IntValue(vCondFmt);
+// Add the integer to the integer list.
+Add Member(vCondInt) To(vInCond);
+
+// Make a property list containing the vInCond list.
+New PropertyList NewVar(vProps) InCond(vInCond);
+// Apply the properties to the text selection.
+
+New TextRange NewVar(vCondTextRange) Object(vPgftoCond)
+	Offset(0) Offset(ObjEndOffset-1);
+
+Apply TextProperties TextRange(vCondTextRange) Properties(vProps);
+
+EndSub
+// ----------------------------------------------------------
+
+Sub LoadVariablesandConditions
+
+//
+// Variable Formats
+Loop ForEach(VarFmt) In(oDoc) LoopVar(vVarFmt)
+	   If (vVarFmt.SystemVar = VarUserVariable)
+
+//			Find String(vVarFmt.Name) InString(vSpecVarFormatsInCatalog) WHOLEWORD ReturnPos(vPos) ReturnStatus(vFoundVarinList);
+			Find Member(vVarFmt.Name) InList(vSpecVarFormatsInCatalog) ReturnStatus(vFoundVarinList);
+
+			If not vFoundVarinList
+				Find String(vVarFmt.Name) InString(vTemplateVariables) WHOLEWORD ReturnPos(vPos) ReturnStatus(vFoundVarinTemplate);
+				If not vFoundVarinTemplate				
+					Add Member(vVarFmt.Name) To(vSpecVarFormatsInCatalog);
+					Add Member(vVarFmt.fmt) To(vSpecVarDescriptionsInCatalog);
+				EndIf
+			EndIf
+		EndIf
+EndLoop
+
+Loop ForEach(CondFmt) In(oDoc) LoopVar(vCondFmt)
+//	Find String(vCondFmt.Name) InString(vSpecCondFormatsInCatalog) WHOLEWORD ReturnPos(vPos) ReturnStatus(vFoundCondinList);
+	Find Member(vCondFmt.Name) InList(vSpecCondFormatsInCatalog) ReturnStatus(vFoundCondinList);
+
+	If not vFoundCondinList
+		Find String(vCondFmt.Name) InString(vTemplateConditions) WHOLEWORD ReturnPos(vPos) ReturnStatus(vFoundCondinTemplate);
+		If not vFoundCondinTemplate	
+			Add Member(vCondFmt.Name) To(vSpecCondFormatsInCatalog);
+			If vCondFmt.CondFmtIsShown = 1
+				Set vIsShowing = 'Yes'
+			Else
+				Set vIsShowing = 'No'
+			EndIf
+			Add Member(vIsShowing) To(vSpecConditionShowing);				
+		EndIf
+	EndIf
+EndLoop
+
+//
+EndSub 
+// ----------------------------------------------------------
+
+Sub ImportCondsAndVariables
+
+If (oOpenedDoc)
+	// Setup Last Page Document
+	Import Formats
+	  DocObject(oImportDocument) FromDocObject(oOpenedDoc) 
+	     Cond Var; 
+Else
+	Display 'Did not load first document in book. Something is broken.';
+EndIf
+EndSub
+// ----------------------------------------------------------
+
+Sub GetDocNumber
+
+// Initialize a regular expression object.
+Set oRegex = InitializeXObject{'VBScript.RegExp'};
+If oRegex = 0
+  LeaveSub;
+EndIf
+// <Default ¶ Font>302681<Default ¶ Font> 
+// Set the regular expression parameters.
+// Match along the entire string.
+Set oRegex.Global = True;
+// Set the pattern to match.
+Set oRegex.Pattern = '<[^<>]+>';  // '<[^>]+>'
+ 
+// Test for a match.
+If oRegex.Test{vFullVarFormat}
+  // Execute all matches along the string.
+  Set oMatch = oRegex.Execute{vFullVarFormat};
+  // Loop through the matches.
+  Loop While(vmatchcount < oMatch.Count) LoopVar(vmatchcount) Init(0) Incr(1)
+    // Replace the match with nothing.
+//    display eStr.properties;
+    Set vFullVarFormat = eStr.ReplaceFirst{vFullVarFormat,oMatch[vmatchcount].Value,''};
+  EndLoop
+EndIf
+
+Set vDocumentNumber = vFullVarFormat;
+If not vDocumentNumber
+ 	Set vDocumentNumber = 'NONE';
+Endif
+
+Find String('{')
+	InString(vDocumentNumber) ReturnStatus(vFoundcurlybracket)
+If vFoundcurlybracket
+ 	Set vDocumentNumber = 'NONE';
+EndIf
+
+
+EndSub
+
+// ----------------------------------------------------------
+// 						FUNCTIONS
+// ----------------------------------------------------------
+Function ProcessBook Using oBook sSub bSaveDocs
+/*
+ProcessBook Version 1.2 April 12, 2004
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set iResult = ProcessBook{ActiveBook,'ProcessDoc',1};
+
+Requires IsDocOpen and ParseFilePath functions.
+
+ProcessBook takes a book object (oBook) and a subroutine name (sSub). 
+It opens each component in the book and runs the subroutine name on that 
+document. The bSaveDocs parameter determines if each component is saved 
+after it is processed. Some subroutines simply collect information
+from book components, so it is not necessary to save the documents after 
+they are processed. Use 1 to save the documents, 0 to not save them.
+Note that book components that are already open in the current FrameMaker
+Session are never saved by this function.
+
+The function returns 0 if all of the components were opened and processed.
+If the function is non-zero number, it represents the number of components
+that were not processed. The names of the skipped components are written
+to the Console window.
+*/
+
+// Initialize the Result variable and counters.
+Local Result(0) iTotalComponents(0) iDocsProcessed(0);
+// See if the book is a valid object.
+If oBook.ObjectName not= 'Book'
+  Set Result = 'The first parameter is not a valid Book object.';
+  LeaveSub;
+EndIf
+// Initialize variables for the book components and document object.
+Local oBookComp(0) oDoc(0) bDocIsOpen(0);
+// Loop through all of the files in the book.
+Loop ForEach(BookComponent) In(oBook) LoopVar(oBookComp)
+  Set iTotalComponents = iTotalComponents + 1; // Total components in book.
+  // Run a function to see of the document is already opened.
+  Set oDoc = IsDocOpen{oBookComp.Name};
+  If oDoc.ObjectName = 'Doc'
+    Set bDocIsOpen = 1; // Indicates that the document is already open.
+  Else
+    Set bDocIsOpen = 0; // Indicates that the document was not already open.
+    Set oDoc = 0; // Reset the document variable
+    Set ErrorCode = 0;
+    // Attempt to open the book component.
+   	Open Document File(oBookComp.Name) NewVar(oDoc)
+   	  UpdateTextReferences(No) UpdateXRefs(No) 
+   	  RefFileNotFound(AllowAllRefFilesUnFindable)
+   	  FontNotFoundInDoc(OK) FileIsOldVersion(OK)
+   	  MakeVisible(False) AlertUserAboutFailure(False);
+   	// If the document can't be opened, write a message to the Console.
+   	If ErrorCode not= 0
+   	  Write Console 'The document '+oBookComp.Name+' could not be opened.';
+   	EndIf
+  EndIf
+  If oDoc not= 0
+    // Write the document's name to the book's status line.
+    Set oBook.StatusLine = 'Processing '+ParseFilePath{oDoc.Name,'FileExt'};
+    // If the document is open, run the ProcessDoc subroutine.
+    Run sSub oDoc(oDoc);
+    Set iDocsProcessed = iDocsProcessed + 1;
+    // See if the document was previously open; if so, leave it open 
+    // and unsaved.
+    If bDocIsOpen = 0
+      If bSaveDocs = 1 // Test the bSaveDocs parameter.
+        Save Document DocObject(oDoc);
+      EndIf
+      Close Document DocObject(oDoc) IgnoreMods;
+    EndIf
+  EndIf
+EndLoop
+// Restore the book status line.
+Set oBook.StatusLine = '';
+// Result of 0 means all book components were processed.
+// A non-zero number is the count of book components not processed.
+Set Result = iTotalComponents - iDocsProcessed;
+//
+EndFunc 
+
+// ----------------------------------------------------------
+Function InitializeXObject sProgId
+//
+Local Result(0);
+				 
+// Create the object.
+New EActiveXObject NewVar(Result) ProgId(sProgId);
+If Result.ErrorCode <> 0
+	Write Console sProgId + ' could not be initialized.';
+  	Write Console 'ErrorCode: '+Result.ErrorCode;
+	Set Result = 0;
+EndIf
+//
+EndFunc
+// ----------------------------------------------------------
+
+Function ParseFilePath Using sPath sReturnType
+/*
+ParseFilePath Version 1.1 January 7, 2004
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vPath = ParseFilePath{'C:\Scripts\CSA\Test.fsl','Path'};
+
+ParseFilePath takes a path name and parses it into component parts.
+sPath is a path and file name. sReturnType is a string that specifies 
+which part of the path is returned from the function.
+
+'Path' returns the path, including the last directory separator.
+'File' returns the file name without the path or extension.
+'Ext' returns the extension or a NULL string if there is no extension.
+'PathFile' returns the path and file without the file extension.
+'FileExt' returns the file name and extension without the path.
+
+You should initialize the ErrorCode variable before calling the function.
+If the color is created successfully, ErrorCode will be 0 after the
+function completes. Otherwise, ErrorCode will be a non-zero number.
+*/
+Local Result(NULL); // Initialize the Result variable.
+Set ErrorCode = 0; // Initialize the ErrorCode variable.
+
+// See if either of the parameters are missing.
+If (Args[1] = NULL) or (Args[2] = NULL)
+  Set ErrorCode = -2407; // Set the ErrorCode to Missing Parameter.
+  LeaveSub;
+EndIf
+
+// Test the sReturnType parameter.
+If eStr.Equal{sReturnType,'Path','NoCase'}
+  Run eSys.ExtractPathName FileName(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'File','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+  Run eSys.RemoveFileExtension FullPath(Result) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'FileExt','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'PathFile','NoCase'}
+  Run eSys.RemoveFileExtension FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'Ext','NoCase'}
+  Run eSys.ExtractFileExtension FullPath(sPath) NewVar(Result);
+Else
+  Set ErrorCode = -43; // Set the ErrorCode to Bad Parameter.
+EndIf
+//
+EndFunc 
+
+// ----------------------------------------------------------
+
+Function OpenADoc Using oTheDoc sSub bSaveDocs bLeaveOpen
+
+/*
+OpenADoc Version 1.0 October 20, 2007 (based on the ProcessBook function)
+By Rick Rettinhouse
+
+Set oResult = OpenADoc{'C:\Document_Template\sample.fm',subroutinename,1,0};
+
+Parameters: 1. Document to open
+			2. Subroutine to run after opening --> 	Use 'None' to not run a subroutine
+													and leave document open
+ 			3. Don't save the document -->			1 = Save, 0 = Don't save
+ 			4. Leave the Document open -->			1 = Leave Open, 0 = Close document
+
+Requires IsDocOpen functions.
+
+OpenADoc takes a document object (oTheDoc) and a subroutine name (sSub). 
+It opens the document and runs the subroutine name on that 
+document. The bSaveDocs parameter determines if each component is saved 
+after it is processed. Some subroutines simply collect information
+from book components, so it is not necessary to save the documents after 
+they are processed. Use 1 to save the documents, 0 to not save them.
+
+The function returns the document object. Errors will be written to the console.
+*/
+
+Set Result = NULL;
+Set oTemporaryDoc = IsDocOpen{oTheDoc};
+
+If (bLeaveOpen = 1) or (sSub = 'None')
+	Set vMakeVisible = 1;
+Else
+	Set vMakeVisible = 0;
+EndIf
+
+If oTemporaryDoc.ObjectName = 'Doc'
+	Set bDocIsOpen = 1; // Indicates that the document is already open.
+Else
+    Set bDocIsOpen = 0; // Indicates that the document was not already open.
+    Set oTemporaryDoc = 0; // Reset the document variable
+    Set ErrorCode = 0;
+    // Attempt to open the book component.
+    Open Document File(oTheDoc) NewVar(oTemporaryDoc)
+      UpdateTextReferences(No) UpdateXRefs(No) 
+      RefFileNotFound(AllowAllRefFilesUnFindable)
+      FontNotFoundInDoc(OK) FileIsOldVersion(OK)
+      MakeVisible(vMakeVisible) AlertUserAboutFailure(False);
+    // If the document can't be opened, write a message to the Console.
+    If ErrorCode not= 0
+      Write Console 'The document '+oBookComp.Name+' could not be opened.';
+      LeaveSub;
+    EndIf
+EndIf
+If sSub not ='None'
+	Run sSub oOpenedDoc(oTemporaryDoc);
+Else
+	Set Result = oTemporaryDoc;
+	LeaveSub;
+EndIf
+
+If (bDocIsOpen = 0) and (bLeaveOpen not = 1)
+	If bSaveDocs = 1 // Test the bSaveDocs parameter.
+		Save Document DocObject(oTemporaryDoc);
+	EndIf
+	Close Document DocObject(oTemporaryDoc) IgnoreMods;
+EndIf
+Set Result = oTemporaryDoc;
+
+EndFunc //--------------------------------------------------------------------
+
+Function IsDocOpen Using sFileName
+/*
+IsDocOpen Version 1.0 December 26, 2003
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vDoc = IsDocOpen{'C:\Templates\MainTemplate.fm'};
+
+IsDocOpen takes a complete file path and sees if the FrameMaker document
+represented by the path is currently open in FrameMaker. It returns
+the document or book object if it is open, or NULL if it is not.
+
+You should test the ObjectName of the returned Result to see if it is
+a Doc object or Book object.
+*/
+
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local oDoc(NULL);
+
+// Loop through the list of open documents.
+Loop ForEach(Doc) In(Session) LoopVar(oDoc)
+  // See if the document name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the document object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+
+// Loop through the list of open books.
+Loop ForEach(Book) In(Session) LoopVar(oDoc)
+  // See if the book name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the book object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+//
+EndFunc //--------------------------------------------------------------------

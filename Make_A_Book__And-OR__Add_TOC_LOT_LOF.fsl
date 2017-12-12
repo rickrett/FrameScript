@@ -1,0 +1,433 @@
+// To do: for each generated file, loop through bookcomp.names to see if they exist. If they do, reset the parameters only (don't add)
+//			Prompt for adding a front matter if one doesn't exist... how.... detect text insets?
+//!REVHIST=[05-31-2013] Added some error checking to make sure a document is currently open and active.
+
+If ActiveDoc
+	Set oDoc = ActiveDoc;
+	Run eSys.ExtractPathName FullPath(oDoc.name) NewVar(sPath);
+	Run eSys.ExtractFileName FullPath(oDoc.name) NewVar(sFile);
+Else
+	If ActiveBook
+		Set oBook = ActiveBook;
+		Run eSys.ExtractPathName FullPath(oBook.name) NewVar(sPath);
+		Run eSys.ExtractFileName FullPath(oBook.name) NewVar(vBookName);
+	Else
+		Display 'There must be a document file open to use this script.';
+		Leavescript;
+	EndIf
+Endif
+
+Run ESys.GetRegistryKeyValue Key('InstallScriptPath') 
+	ValueName('GeneralFunctions.fsl') NewVar(vscript_GenFunctions);	
+New ScriptVar NewVar(oScript_GenFunctions) File(vscript_GenFunctions);
+
+If not vTemplatePath
+	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
+EndIf
+//	Set sFile = vTemplatePath+dirsep+'Inphi_Template.fm';
+
+Set sBatchFile = vTemplatePath+dirsep+'Mapping_Batchfile.fm'; //'C:\Document_Templates\Mapping_Batchfile.fm';
+Set oBatchFile = OpenADoc{sBatchFile,'GetHeadingStyles',0,0,0}; // doc-to-open, subroutine,save(0/1),leave open(0/1), make visible(0/1)
+
+If oDoc
+	Get Object Type(VarFmt) Name(vDocNumVarScanName) // Name('Doc:Num')
+		NewVar(oDocNum) DocObject(oDoc);
+	If (not oDocNum)
+		write console 'No Doc:Num variable present. Setting Doc. number in file name as "XXXXXX"';
+		Set vDocNum = 'XXXXXX';
+	Else
+		Set vDocNum = RemoveVarFormatting{oDocNum.fmt}; //vDocTitleObject.fmt};  
+	EndIf
+	Find String(vDocNum) InString(sFile)
+	  NoCase ReturnStatus(vFoundDocNumInTitle);
+
+	If vFoundDocNumInTitle
+		Set vTitleName = sFile;	
+	Else
+		Set vTitleName = vDocNum+'_'+sFile;
+	EndIf
+
+	Run eSys.RemoveFileExtension FullPath(vTitleName) NewExt('book') NewVar(vTitleNameOnly);
+
+	DialogBox Type(String) Title('What do you want to name the book?')// Caption('Make-A-Book')
+		Init(vTitleNameOnly) NewVar(vBookName) Button(vButton);
+	If (vButton = CancelButton) LeaveSub; EndIf
+
+	Set oDoc.PageRounding = PrDelEmpty;
+	Set oDoc.PageNumComputeMethod = NumContinue;
+	Set oDoc.PGFNumComputeMethod = NumContinue;
+	Set oDoc.ChapNumComputeMethod = NumContinue;
+	Set oDoc.FNNumComputeMethod = NumRestart;
+	Save Document DocObject(oDoc);
+
+	// Make the book document.
+	New Book NewVar(oBook) Name(vBookName);
+EndIf
+
+Set vBookName = ParseFilePath{vBookName,'File'};
+
+// MAKE THE LOT
+Set vLOTFilePath = sPath + vBookName+'LOT.fm';
+New StringList NewVar(sLOTFmtLst)
+	Value(vCapTableScanName); //('Caption:Table');
+
+New BookComponent BookObject(oBook) NewVar(oBkComp);
+Set oBkComp.BookComponentType = BkListTable;
+Set oBkComp.PageNumComputeMethod = NumContinue;
+Set oBkComp.PGFNumComputeMethod = NumContinue;
+Set oBkComp.ChapNumComputeMethod = NumContinue;
+Set oBkComp.FNNumComputeMethod = NumRestart;
+Set oBkComp.TblFNNumComputeMethod = NumRestart;
+Set oBkComp.Name = vLOTFilePath;
+Set oBkComp.ExtractTags = sLOTFmtLst;
+Set oBkComp.GenerateInclude = True;
+
+
+// MAKE THE LOF
+Set vLOFFilePath = sPath + vBookName+'LOF.fm';
+New StringList NewVar(sFigureFmtLst)
+	Value(vCapFigScanName); //('Caption:Figure');
+
+New BookComponent BookObject(oBook) NewVar(oBkComp);
+Set oBkComp.BookComponentType = BkListFigure;
+Set oBkComp.PageNumComputeMethod = NumContinue;
+Set oBkComp.PGFNumComputeMethod = NumContinue;
+Set oBkComp.ChapNumComputeMethod = NumContinue;
+Set oBkComp.FNNumComputeMethod = NumRestart;
+Set oBkComp.TblFNNumComputeMethod = NumRestart;
+Set oBkComp.Name = vLOFFilePath;
+Set oBkComp.ExtractTags = sFigureFmtLst;
+Set oBkComp.GenerateInclude = True;
+
+
+// MAKE THE TOC
+Set vTOCFilePath = sPath + vBookName+'TOC.fm';
+New StringList NewVar(sTOCFmtLst)
+	Value(vH1ScanName) Value(vH2ScanName) Value(vH3ScanName)	Value(vH4ScanName) 
+	Value(vHA1ScanName) Value(vHA2ScanName) Value(vHA3ScanName);
+//	Value('Heading:L1') Value('Heading:L2') Value('Heading:L3')	Value('Heading:L4') 
+//	Value('Heading:Appendix:L1') Value('Heading:Appendix:L2') Value('Heading:Appendix:L3');
+
+New BookComponent BookObject(oBook) NewVar(oBkComp);
+Set oBkComp.BookComponentType = BkToc;
+Set oBkComp.PageNumComputeMethod = NumContinue;
+Set oBkComp.PGFNumComputeMethod = NumContinue;
+Set oBkComp.ChapNumComputeMethod = NumContinue;
+Set oBkComp.FNNumComputeMethod = NumRestart;
+Set oBkComp.TblFNNumComputeMethod = NumRestart;
+Set oBkComp.Name = vTOCFilePath;
+Set oBkComp.ExtractTags = sTOCFmtLst;
+Set oBkComp.GenerateInclude = True;
+
+If oDoc // Only add the open document if a document is active
+	// Add The Active Document to the book
+	New BookComponent BookObject(oBook) NewVar(oBkComp);
+	Set oBkComp.BookComponentType = BkNotGeneratable;
+	Set oBkComp.PageNumComputeMethod = NumContinue;
+	Set oBkComp.PGFNumComputeMethod = NumContinue;
+	Set oBkComp.ChapNumComputeMethod = NumContinue;
+	Set oBkComp.FNNumComputeMethod = NumRestart;
+	Set oBkComp.TblFNNumComputeMethod = NumRestart;
+	Set oBkComp.Name = oDoc.Name;
+
+	Set oDoc = IfDocOpenSaveClose{oBkComp.Name};
+EndIf
+
+Update Book BookObject(oBook)	// [6.0+]
+Save Book BookObject(oBook) file(spath+dirsep+vBookName+'.book');
+
+// Close the generated files
+Set vFoundDoc = IfDocOpenSaveClose{vTOCFilePath};
+Set vFoundDoc = IfDocOpenSaveClose{vLOTFilePath};
+Set vFoundDoc = IfDocOpenSaveClose{vLOFFilePath};
+
+
+
+
+LeaveSub;
+//---------------------------------------------------------
+
+Sub GetHeadingStyles
+
+Set vH1ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:L1'};
+Set vH2ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:L2'};
+Set vH3ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:L3'};
+Set vH4ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:L4'};
+Set vDocNumVarScanName = oScript_GenFunctions.ScanMasterTable{'V','Doc:Num'};
+Set vCapTableScanName = oScript_GenFunctions.ScanMasterTable{'P','Caption:Table'};
+Set vCapFigScanName = oScript_GenFunctions.ScanMasterTable{'P','Caption:Figure'};
+Set vHA1ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:Appendix:L1'};
+Set vHA2ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:Appendix:L2'};
+Set vHA2ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:Appendix:L3'};
+Set vHA3ScanName = oScript_GenFunctions.ScanMasterTable{'P','Heading:Appendix:L4'};
+Set vSE1ScanName = oScript_GenFunctions.ScanMasterTable{'P','SpecUpdate:Erratum:1'};
+Set vSEnScanName = oScript_GenFunctions.ScanMasterTable{'P','SpecUpdate:Erratum:n+'};
+Set vSI1ScanName = oScript_GenFunctions.ScanMasterTable{'P','SpecUpdate:Item:1'};
+Set vSInScanName = oScript_GenFunctions.ScanMasterTable{'P','SpecUpdate:Item:n+'};
+
+EndSub
+// ------------------------------------------------------------------
+
+/*
+********   Functions   ********
+*/
+Function ParseFilePath Using sPath sReturnType
+/*
+ParseFilePath Version 1.1 January 7, 2004
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vPath = ParseFilePath{'C:\Scripts\CSA\Test.fsl','Path'};
+
+ParseFilePath takes a path name and parses it into component parts.
+sPath is a path and file name. sReturnType is a string that specifies 
+which part of the path is returned from the function.
+
+'Path' returns the path, including the last directory separator.
+'File' returns the file name without the path or extension.
+'Ext' returns the extension or a NULL string if there is no extension.
+'PathFile' returns the path and file without the file extension.
+'FileExt' returns the file name and extension without the path.
+
+You should initialize the ErrorCode variable before calling the function.
+If the color is created successfully, ErrorCode will be 0 after the
+function completes. Otherwise, ErrorCode will be a non-zero number.
+*/
+Local Result(NULL); // Initialize the Result variable.
+Set ErrorCode = 0; // Initialize the ErrorCode variable.
+
+// See if either of the parameters are missing.
+If (Args[1] = NULL) or (Args[2] = NULL)
+  Set ErrorCode = -2407; // Set the ErrorCode to Missing Parameter.
+  LeaveSub;
+EndIf
+
+// Test the sReturnType parameter.
+If eStr.Equal{sReturnType,'Path','NoCase'}
+  Run eSys.ExtractPathName FileName(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'File','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+  Run eSys.RemoveFileExtension FullPath(Result) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'FileExt','NoCase'}
+  Run eSys.ExtractFileName FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'PathFile','NoCase'}
+  Run eSys.RemoveFileExtension FullPath(sPath) NewVar(Result);
+ElseIf eStr.Equal{sReturnType,'Ext','NoCase'}
+  Run eSys.ExtractFileExtension FullPath(sPath) NewVar(Result);
+Else
+  Set ErrorCode = -43; // Set the ErrorCode to Bad Parameter.
+EndIf
+//
+EndFunc 
+//---------------------------------------------------------
+
+Function RemoveVarFormatting Using sFmt
+
+Local Result(NULL); // Initialize the Result variable.
+
+	Set oRegex = InitializeXObject{'VBScript.RegExp'};
+	If oRegex = 0
+	  LeaveSub;
+	EndIf
+	 
+	// Set the regular expression parameters.
+	// Match along the entire string.
+	Set oRegex.Global = True;
+	// Set the pattern to match.
+	Set oRegex.Pattern = '<[^>]+>';
+	 
+	// Test for a match.
+	If oRegex.Test{sFmt}
+	  // Execute all matches along the string.
+	  Set oMatch = oRegex.Execute{sFmt};
+	  // Loop through the matches.
+	  Loop While(vMatchCnt < oMatch.Count) LoopVar(vMatchCnt) Init(0) Incr(1)
+	    // Replace the match with nothing.
+	    Set sFmt = eStr.ReplaceFirst{sFmt,oMatch[vMatchCnt].Value,''};  // This variable must be "sFmt" for the loop to work.
+	  EndLoop
+	EndIf
+
+	Set Result = sFmt;
+
+EndFunc
+//---------------------------------------------------------
+				
+Function InitializeXObject sProgId
+//
+Local Result(0);
+ 
+// Create the object.
+New EActiveXObject NewVar(Result) ProgId(sProgId);
+If Result.ErrorCode <> 0
+	Write Console sProgId + ' could not be initialized.';
+	Write Console 'ErrorCode: '+Result.ErrorCode;
+	Set Result = 0;
+EndIf
+//
+EndFunc 
+//---------------------------------------------------------
+
+
+Function IfDocOpenSaveClose Using sFileName
+/*
+Modified by Rick Rettinhouse from IsDocOpen Version 1.0 December 26, 2003 By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+This version saves open documents and closes them.
+
+Set vDoc = IfDocOpenSaveClose{'C:\Templates\MainTemplate.fm'};
+
+IfDocOpenSaveClose takes a complete file path and sees if the FrameMaker document
+represented by the path is currently open in FrameMaker. It saves and closes then returns
+the document or book object if it is open, or NULL if it is not.
+
+You should test the ObjectName of the returned Result to see if it is
+a Doc object or Book object.
+*/
+
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local oDoc(NULL);
+
+// Loop through the list of open documents.
+Loop ForEach(Doc) In(Session) LoopVar(oDoc)
+  // See if the document name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the document object.
+    Set Result = oDoc;
+    Save Document DocObject(oDoc);
+    Close Doc DocObject(oDoc) IgnoreMods;	
+	
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+
+// Loop through the list of open books.
+Loop ForEach(Book) In(Session) LoopVar(oDoc)
+  // See if the book name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the book object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+//
+EndFunc //--------------------------------------------------------------------
+
+Function OpenADoc Using oTheDoc sSub bSaveDocs bLeaveOpen bMakeVisible
+
+/*
+OpenADoc Version 1.0 October 20, 2007 (based on the ProcessBook function)
+By Rick Rettinhouse
+
+Set oResult = OpenADoc{'C:\Document_Template\sample.fm',subroutinename,0,1,0}; // doc-to-open, subroutine,save(0/1),leave open(0/1), make visible(0/1)
+
+Parameters: 1. Document to open
+			2. Subroutine to run after opening --> 	Use 'None' to not run a subroutine
+													and leave document open
+ 			3. Don't save the document -->			1 = Save, 0 = Don't save
+ 			4. Leave the Document open -->			1 = Leave Open, 0 = Close document
+			5. Make the document visible -->		1 = visible, 0 = invisible
+
+Requires IsDocOpen functions.
+
+OpenADoc takes a document object (oTheDoc) and a subroutine name (sSub). 
+It opens the document and runs the subroutine name on that 
+document. The bSaveDocs parameter determines if each component is saved 
+after it is processed. Some subroutines simply collect information
+from book components, so it is not necessary to save the documents after 
+they are processed.
+
+The function returns the document object. Errors will be written to the console.
+*/
+
+Set Result = NULL;
+Set oTemporaryDoc = IsDocOpen{oTheDoc};
+
+/*
+If (bLeaveOpen = 1) or (sSub = 'None')
+	Set vMakeVisible = 1;
+Else
+	Set vMakeVisible = 0;
+EndIf
+*/
+If oTemporaryDoc.ObjectName = 'Doc'
+	Set bDocIsOpen = 1; // Indicates that the document is already open.
+Else
+    Set bDocIsOpen = 0; // Indicates that the document was not already open.
+    Set oTemporaryDoc = 0; // Reset the document variable
+    Set ErrorCode = 0;
+    // Attempt to open the book component.
+    Open Document File(oTheDoc) NewVar(oTemporaryDoc)
+      UpdateTextReferences(No) UpdateXRefs(No) 
+      RefFileNotFound(AllowAllRefFilesUnFindable)
+      FontNotFoundInDoc(OK) FileIsOldVersion(OK)
+      MakeVisible(bMakeVisible) AlertUserAboutFailure(False);
+    // If the document can't be opened, write a message to the Console.
+    If ErrorCode not= 0
+      Write Console 'The document '+oBookComp.Name+' could not be opened.';
+      LeaveSub;
+    EndIf
+EndIf
+If sSub not ='None'
+	Run sSub oOpenedDoc(oTemporaryDoc);
+Else
+	Set Result = oTemporaryDoc;
+	LeaveSub;
+EndIf
+
+If (bDocIsOpen = 0) and (bLeaveOpen not = 1)
+	If bSaveDocs = 1 // Test the bSaveDocs parameter.
+		Save Document DocObject(oTemporaryDoc);
+	EndIf
+	Close Document DocObject(oTemporaryDoc) IgnoreMods;
+EndIf
+Set Result = oTemporaryDoc;
+
+EndFunc //--------------------------------------------------------------------
+
+
+
+//--------------------------------------------------------------------
+
+Function IsDocOpen Using sFileName
+/*
+IsDocOpen Version 1.0 December 26, 2003
+By Carmen Publishing rick@frameexpert.com www.frameexpert.com
+
+Set vDoc = IsDocOpen{'C:\Templates\MainTemplate.fm'};
+
+IsDocOpen takes a complete file path and sees if the FrameMaker document
+represented by the path is currently open in FrameMaker. It returns
+the document or book object if it is open, or NULL if it is not.
+
+You should test the ObjectName of the returned Result to see if it is
+a Doc object or Book object.
+*/
+
+// Initialize the Result variable.
+Set Result = NULL;
+// Set a local document variable.
+Local oDoc(NULL);
+
+// Loop through the list of open documents.
+Loop ForEach(Doc) In(Session) LoopVar(oDoc)
+  // See if the document name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the document object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+
+// Loop through the list of open books.
+Loop ForEach(Book) In(Session) LoopVar(oDoc)
+  // See if the book name is equal to the name passed to the function.
+  If eStr.Equal{sFileName,oDoc.Name,'NoCase'}
+    // If a match is found, return the book object.
+    Set Result = oDoc;
+    LeaveSub; // Exit the function.
+  EndIf
+EndLoop
+//
+EndFunc //--------------------------------------------------------------------
+
