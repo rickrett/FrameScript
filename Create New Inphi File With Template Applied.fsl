@@ -6,8 +6,8 @@ If displaying = 1
 	Set Displaying = 0;
 EndIf 
 
-//	Set sFile = 'C:\Document_Templates\Inphi_Template.fm';
-//	Set sFile = 'C:\Document_Templates\Inphi_Template.fm';
+//	Set sFile = 'C:\Document_Templates\Company_Template.fm';
+//	Set sFile = 'C:\Document_Templates\Company_Template.fm';
 If not vTemplatePath
 	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
 EndIf
@@ -24,15 +24,15 @@ DialogBox Type(ScrollBox) Caption('Which Template?')
 If (vButton = CancelButton) LeaveSub; EndIf
 
 	If vSelIndex = 1
-		Set sTemplateFileName = 'Inphi_Template.fm';
+		Set sTemplateFileName = 'Company_Template.fm';
 	EndIf
 
 	If vSelIndex = 2
-		Set sTemplateFileName = 'Inphi_New_Template.fm';
+		Set sTemplateFileName = 'Company_New_Template.fm';
 	EndIf
 
 	Set sFile = vTemplatePath+dirsep+sTemplateFileName;
-//	Set sFile = vTemplatePath+dirsep+'Inphi_Template.fm';
+//	Set sFile = vTemplatePath+dirsep+'Company_Template.fm';
 	New Document NewVar(oDoc) Template(sFile);
 
 	//-- Paragraph in Doc:
@@ -68,4 +68,4 @@ EndIf
 
 
 EndSub
-//!REVHIST=[05-25-2012] Fixed blank Cortina document routine top blank paragraph is a BODY paragraph.
+//!REVHIST=[05-25-2012] Fixed blank Company document routine top blank paragraph is a BODY paragraph.
