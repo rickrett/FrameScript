@@ -38,9 +38,9 @@ Set vDocNumVarName = vBatchScript.ScanMasterTable{'V','Doc:Num'};
 If not vTemplatePath
 	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
 EndIf
-Set vFilePath = vTemplatePath+dirsep+'Inphi_Template.fm';
+Set vFilePath = vTemplatePath+dirsep+'Company_Template.fm';
 
-//Set vFilePath = 'C:\Document_Templates\Inphi_Template.fm';
+//Set vFilePath = 'C:\Document_Templates\Company_Template.fm';
 Set oTemplateDoc = OpenADoc{vFilePath,ProcessTemplateandMakeContactPage,0,0};
 
 Run ProcessContactPage;
@@ -471,7 +471,7 @@ Set oRegex = InitializeXObject{'VBScript.RegExp'};
 If oRegex = 0
   LeaveSub;
 EndIf
-// <Default ¶ Font>302681<Default ¶ Font> 
+// <Default Â¶ Font>302681<Default Â¶ Font> 
 // Set the regular expression parameters.
 // Match along the entire string.
 Set oRegex.Global = True;
