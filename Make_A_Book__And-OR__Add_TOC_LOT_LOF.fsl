@@ -24,7 +24,7 @@ New ScriptVar NewVar(oScript_GenFunctions) File(vscript_GenFunctions);
 If not vTemplatePath
 	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
 EndIf
-//	Set sFile = vTemplatePath+dirsep+'Inphi_Template.fm';
+//	Set sFile = vTemplatePath+dirsep+'Company_Template.fm';
 
 Set sBatchFile = vTemplatePath+dirsep+'Mapping_Batchfile.fm'; //'C:\Document_Templates\Mapping_Batchfile.fm';
 Set oBatchFile = OpenADoc{sBatchFile,'GetHeadingStyles',0,0,0}; // doc-to-open, subroutine,save(0/1),leave open(0/1), make visible(0/1)
