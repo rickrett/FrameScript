@@ -54,8 +54,8 @@ EndIf
 If not vTemplatePath
 	Set vTemplatePath = 'C:\Document_Templates_FM'+session.versionmajor;
 EndIf
-Set vTemplateFile = vTemplatePath+dirsep+'Inphi_Template.fm';
-//Set vTemplateFile = 'C:\Document_Templates\Inphi_Template.fm';
+Set vTemplateFile = vTemplatePath+dirsep+'Company_Template.fm';
+//Set vTemplateFile = 'C:\Document_Templates\Company_Template.fm';
 New Document NewVar(oFrontMatterDoc) Template(vTemplateFile);
 
 New TextRange NewVar(tTextRange) 
